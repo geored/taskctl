@@ -31,9 +31,40 @@ func main() {
 		fmt.Printf("Created task #%d: %s [%s]\n", t.ID, t.Title, t.Priority)
 
 	case "list":
-		tasks := mgr.List()
+		// Parse the optional --priority flag to filter the output.
+		// When omitted, all tasks are displayed.
+		priorityFilter := ""
+		for i, arg := range os.Args {
+			if arg == "--priority" && i+1 < len(os.Args) {
+				priorityFilter = os.Args[i+1]
+			}
+		}
+
+		// Validate the supplied priority value when the flag is present.
+		if priorityFilter != "" {
+			switch priorityFilter {
+			case "high", "medium", "low":
+				// valid — proceed
+			default:
+				fmt.Fprintf(os.Stderr, "invalid priority %q: must be high, medium, or low\n", priorityFilter)
+				os.Exit(1)
+			}
+		}
+
+		// Retrieve tasks — filtered or full list.
+		var tasks []task.Task
+		if priorityFilter != "" {
+			tasks = mgr.FilterByPriority(priorityFilter)
+		} else {
+			tasks = mgr.List()
+		}
+
 		if len(tasks) == 0 {
-			fmt.Println("No tasks.")
+			if priorityFilter != "" {
+				fmt.Printf("No %s-priority tasks.\n", priorityFilter)
+			} else {
+				fmt.Println("No tasks.")
+			}
 			return
 		}
 		for _, t := range tasks {
@@ -81,7 +112,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  taskctl add <title> [--priority high|medium|low]")
-	fmt.Println("  taskctl list")
+	fmt.Println("  taskctl list [--priority high|medium|low]")
 	fmt.Println("  taskctl done <id>")
 	fmt.Println("  taskctl delete <id>")
 }
