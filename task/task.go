@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Task represents a single task item with a priority level.
 type Task struct {
 	ID        int       `json:"id"`
 	Title     string    `json:"title"`
@@ -15,18 +16,23 @@ type Task struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Manager handles persistence and operations on the task list.
 type Manager struct {
 	filepath string
 	tasks    []Task
 	nextID   int
 }
 
+// NewManager creates a Manager backed by the given JSON file path and
+// loads any previously persisted tasks from disk.
 func NewManager(filepath string) *Manager {
 	m := &Manager{filepath: filepath}
 	m.load()
 	return m
 }
 
+// Add creates a new task with the given title and priority, persists it,
+// and returns the created Task.
 func (m *Manager) Add(title, priority string) Task {
 	t := Task{
 		ID:        m.nextID,
@@ -41,10 +47,30 @@ func (m *Manager) Add(title, priority string) Task {
 	return t
 }
 
+// List returns all tasks regardless of priority.
 func (m *Manager) List() []Task {
 	return m.tasks
 }
 
+// FilterByPriority returns only the tasks whose Priority field matches
+// the supplied priority string (case-sensitive: "high", "medium", "low").
+// An empty slice is returned when no tasks match.
+func (m *Manager) FilterByPriority(priority string) []Task {
+	var filtered []Task
+	for _, t := range m.tasks {
+		if t.Priority == priority {
+			filtered = append(filtered, t)
+		}
+	}
+	// Return an initialised empty slice instead of nil so callers can
+	// safely range over the result without a nil-check.
+	if filtered == nil {
+		return []Task{}
+	}
+	return filtered
+}
+
+// Complete marks the task with the given ID as done and persists the change.
 func (m *Manager) Complete(id int) error {
 	for i := range m.tasks {
 		if m.tasks[i].ID == id {
@@ -56,6 +82,7 @@ func (m *Manager) Complete(id int) error {
 	return fmt.Errorf("task #%d not found", id)
 }
 
+// Delete removes the task with the given ID and persists the change.
 func (m *Manager) Delete(id int) error {
 	for i := range m.tasks {
 		if m.tasks[i].ID == id {
