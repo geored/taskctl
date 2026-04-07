@@ -13,13 +13,13 @@ const dateLayout = "2006-01-02"
 
 // Task represents a single to-do item.
 type Task struct {
-	ID        int    `json:"id"`
-	Title     string `json:"title"`
-	Done      bool   `json:"done"`
-	Priority  string `json:"priority"`
+	ID       int    `json:"id"`
+	Title    string `json:"title"`
+	Done     bool   `json:"done"`
+	Priority string `json:"priority"`
 	// DueDate holds an optional due date in YYYY-MM-DD format.
 	// An empty string means no due date has been set.
-	DueDate   string `json:"due_date,omitempty"`
+	DueDate string `json:"due_date,omitempty"`
 }
 
 // IsOverdue reports whether the task is incomplete and its due date has passed
@@ -78,7 +78,7 @@ func (m *Manager) save(tasks []Task) error {
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
-// dueDate must be in YYYY-MM-DD format or empty string for no due date.
+// dueDate must be in YYYY-MM-DD format or an empty string for no due date.
 // Returns an error if dueDate is non-empty but cannot be parsed.
 func (m *Manager) Add(title, priority, dueDate string) error {
 	// Validate due date format when provided.
