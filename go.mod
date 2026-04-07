@@ -1,3 +1,3 @@
-module github.com/geored/taskctl
+module taskctl
 
 go 1.22
