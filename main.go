@@ -101,6 +101,16 @@ func main() {
 		}
 		fmt.Printf("Task #%d deleted.\n", id)
 
+	case "clear":
+		// Remove all completed (done=true) tasks and report the outcome.
+		result := mgr.Clear()
+		if result.Cleared == 0 {
+			fmt.Println("No completed tasks to clear.")
+		} else {
+			fmt.Printf("Cleared %d completed task(s). %d task(s) remaining.\n",
+				result.Cleared, result.Remaining)
+		}
+
 	case "stats":
 		// Compute and display summary statistics for all tasks.
 		s := mgr.Stats()
@@ -126,5 +136,6 @@ func printUsage() {
 	fmt.Println("  taskctl list [--priority high|medium|low]")
 	fmt.Println("  taskctl done <id>")
 	fmt.Println("  taskctl delete <id>")
+	fmt.Println("  taskctl clear")
 	fmt.Println("  taskctl stats")
 }
