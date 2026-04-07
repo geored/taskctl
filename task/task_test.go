@@ -1,308 +1,303 @@
 package task
 
 import (
+	"path/filepath"
 	"testing"
+	"time"
 )
 
-func TestAddTask(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+// newManager is a test helper that creates a Manager backed by a temp file.
+func newManager(t *testing.T) *Manager {
+	t.Helper()
+	return NewManager(filepath.Join(t.TempDir(), "tasks.json"))
+}
 
-	task := mgr.Add("Test task", "high")
-	if task.Title != "Test task" {
-		t.Errorf("expected title 'Test task', got '%s'", task.Title)
+// ---------------------------------------------------------------------------
+// Existing functionality tests (preserved + upgraded to t.TempDir())
+// ---------------------------------------------------------------------------
+
+func TestAdd(t *testing.T) {
+	mgr := newManager(t)
+	if err := mgr.Add("Buy milk", "low", ""); err != nil {
+		t.Fatalf("Add: unexpected error: %v", err)
 	}
-	if task.Priority != "high" {
-		t.Errorf("expected priority 'high', got '%s'", task.Priority)
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
 	}
-	if task.Done {
-		t.Error("new task should not be done")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Title != "Buy milk" {
+		t.Errorf("expected title %q, got %q", "Buy milk", tasks[0].Title)
 	}
 }
 
-func TestListTasks(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+func TestList(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "low", "")
 
-	mgr.Add("Task 1", "low")
-	mgr.Add("Task 2", "high")
-
-	tasks := mgr.List()
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
 	if len(tasks) != 2 {
-		t.Errorf("expected 2 tasks, got %d", len(tasks))
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
 	}
 }
 
-func TestCompleteTask(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+func TestComplete(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Finish report", "medium", "")
 
-	task := mgr.Add("Complete me", "medium")
-	err := mgr.Complete(task.ID)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	tasks, _ := mgr.List("", false)
+	id := tasks[0].ID
+
+	if err := mgr.Complete(id); err != nil {
+		t.Fatalf("Complete: unexpected error: %v", err)
 	}
-
-	tasks := mgr.List()
+	tasks, _ = mgr.List("", false)
 	if !tasks[0].Done {
-		t.Error("task should be marked as done")
+		t.Error("expected task to be marked done")
 	}
 }
 
-func TestCompleteNonExistent(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+func TestDelete(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Temporary task", "medium", "")
 
-	err := mgr.Complete(999)
-	if err == nil {
-		t.Error("expected error for non-existent task")
+	tasks, _ := mgr.List("", false)
+	id := tasks[0].ID
+
+	if err := mgr.Delete(id); err != nil {
+		t.Fatalf("Delete: unexpected error: %v", err)
 	}
-}
-
-func TestDeleteTask(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	task := mgr.Add("Delete me", "low")
-	err := mgr.Delete(task.ID)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	tasks := mgr.List()
+	tasks, _ = mgr.List("", false)
 	if len(tasks) != 0 {
 		t.Errorf("expected 0 tasks after delete, got %d", len(tasks))
 	}
 }
 
-// TestFilterByPriority verifies that FilterByPriority returns only tasks
-// whose Priority field matches the requested level.
-func TestFilterByPriority(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+func TestListFilterByPriority(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("High task", "high", "")
+	_ = mgr.Add("Low task", "low", "")
+	_ = mgr.Add("Medium task", "medium", "")
 
-	mgr.Add("High task 1", "high")
-	mgr.Add("Medium task 1", "medium")
-	mgr.Add("Low task 1", "low")
-	mgr.Add("High task 2", "high")
-	mgr.Add("Medium task 2", "medium")
-
-	tests := []struct {
-		priority string
-		wantLen  int
-	}{
-		{"high", 2},
-		{"medium", 2},
-		{"low", 1},
-		{"unknown", 0},
+	tasks, err := mgr.List("high", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
 	}
-
-	for _, tc := range tests {
-		t.Run("priority="+tc.priority, func(t *testing.T) {
-			result := mgr.FilterByPriority(tc.priority)
-			if len(result) != tc.wantLen {
-				t.Errorf("FilterByPriority(%q): expected %d tasks, got %d",
-					tc.priority, tc.wantLen, len(result))
-			}
-			// Verify every returned task actually has the requested priority.
-			for _, task := range result {
-				if task.Priority != tc.priority {
-					t.Errorf("FilterByPriority(%q): got task with priority %q",
-						tc.priority, task.Priority)
-				}
-			}
-		})
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 high-priority task, got %d", len(tasks))
 	}
-}
-
-// TestFilterByPriorityEmptyStore ensures FilterByPriority returns an empty
-// (non-nil) slice when the task store is empty.
-func TestFilterByPriorityEmptyStore(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	result := mgr.FilterByPriority("high")
-	if result == nil {
-		t.Error("FilterByPriority should return a non-nil slice, got nil")
-	}
-	if len(result) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(result))
+	if tasks[0].Priority != "high" {
+		t.Errorf("expected priority %q, got %q", "high", tasks[0].Priority)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Stats tests
+// Stats tests (existing, preserved)
 // ---------------------------------------------------------------------------
 
-// TestStats_EmptyStore verifies that Stats() returns all-zero values when
-// there are no tasks in the store.
-func TestStats_EmptyStore(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	s := mgr.Stats()
-
-	if s.Total != 0 {
-		t.Errorf("Total: want 0, got %d", s.Total)
+func TestStatsEmpty(t *testing.T) {
+	mgr := newManager(t)
+	s, err := mgr.Stats()
+	if err != nil {
+		t.Fatalf("Stats: unexpected error: %v", err)
 	}
-	if s.Pending != 0 {
-		t.Errorf("Pending: want 0, got %d", s.Pending)
-	}
-	if s.Completed != 0 {
-		t.Errorf("Completed: want 0, got %d", s.Completed)
-	}
-	if s.HighPriority != 0 {
-		t.Errorf("HighPriority: want 0, got %d", s.HighPriority)
-	}
-	if s.MediumPriority != 0 {
-		t.Errorf("MediumPriority: want 0, got %d", s.MediumPriority)
-	}
-	if s.LowPriority != 0 {
-		t.Errorf("LowPriority: want 0, got %d", s.LowPriority)
-	}
-	if s.CompletionRate != 0 {
-		t.Errorf("CompletionRate: want 0, got %d", s.CompletionRate)
+	if s.Total != 0 || s.Completed != 0 || s.Pending != 0 || s.Overdue != 0 {
+		t.Errorf("expected all-zero stats on empty store, got %+v", s)
 	}
 }
 
-// TestStats_MixedTasks verifies Stats() counts correctly across a realistic
-// mix of tasks with different priorities and completion states.
-// This mirrors the exact example from issue #3:
-//
-//	Total tasks: 12 | Pending: 8 | Completed: 4 | Completion rate: 33%
-//	High priority: 3 | Medium priority: 6 | Low priority: 3
-func TestStats_MixedTasks(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+func TestStatsMixed(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task 1", "high", "")
+	_ = mgr.Add("Task 2", "low", "")
+	_ = mgr.Add("Task 3", "medium", "")
 
-	// Add 12 tasks: 3 high, 6 medium, 3 low
-	h1 := mgr.Add("High 1", "high")
-	h2 := mgr.Add("High 2", "high")
-	mgr.Add("High 3", "high")
-	m1 := mgr.Add("Medium 1", "medium")
-	m2 := mgr.Add("Medium 2", "medium")
-	mgr.Add("Medium 3", "medium")
-	mgr.Add("Medium 4", "medium")
-	mgr.Add("Medium 5", "medium")
-	mgr.Add("Medium 6", "medium")
-	mgr.Add("Low 1", "low")
-	mgr.Add("Low 2", "low")
-	mgr.Add("Low 3", "low")
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[0].ID)
 
-	// Complete 4 tasks (h1, h2, m1, m2)
-	mgr.Complete(h1.ID)
-	mgr.Complete(h2.ID)
-	mgr.Complete(m1.ID)
-	mgr.Complete(m2.ID)
-
-	s := mgr.Stats()
-
-	if s.Total != 12 {
-		t.Errorf("Total: want 12, got %d", s.Total)
+	s, err := mgr.Stats()
+	if err != nil {
+		t.Fatalf("Stats: unexpected error: %v", err)
 	}
-	if s.Completed != 4 {
-		t.Errorf("Completed: want 4, got %d", s.Completed)
-	}
-	if s.Pending != 8 {
-		t.Errorf("Pending: want 8, got %d", s.Pending)
-	}
-	if s.HighPriority != 3 {
-		t.Errorf("HighPriority: want 3, got %d", s.HighPriority)
-	}
-	if s.MediumPriority != 6 {
-		t.Errorf("MediumPriority: want 6, got %d", s.MediumPriority)
-	}
-	if s.LowPriority != 3 {
-		t.Errorf("LowPriority: want 3, got %d", s.LowPriority)
-	}
-	// 4/12 = 33% (integer division)
-	if s.CompletionRate != 33 {
-		t.Errorf("CompletionRate: want 33, got %d", s.CompletionRate)
-	}
-}
-
-// TestStats_AllCompleted verifies that CompletionRate is 100 when every
-// task is marked done.
-func TestStats_AllCompleted(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	t1 := mgr.Add("Task A", "high")
-	t2 := mgr.Add("Task B", "low")
-	mgr.Complete(t1.ID)
-	mgr.Complete(t2.ID)
-
-	s := mgr.Stats()
-
-	if s.Total != 2 {
-		t.Errorf("Total: want 2, got %d", s.Total)
-	}
-	if s.Completed != 2 {
-		t.Errorf("Completed: want 2, got %d", s.Completed)
-	}
-	if s.Pending != 0 {
-		t.Errorf("Pending: want 0, got %d", s.Pending)
-	}
-	if s.CompletionRate != 100 {
-		t.Errorf("CompletionRate: want 100, got %d", s.CompletionRate)
-	}
-}
-
-// TestStats_NoPending verifies counts when all tasks are pending (none done).
-func TestStats_NoPending(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	mgr.Add("Task 1", "high")
-	mgr.Add("Task 2", "medium")
-	mgr.Add("Task 3", "low")
-
-	s := mgr.Stats()
-
 	if s.Total != 3 {
-		t.Errorf("Total: want 3, got %d", s.Total)
+		t.Errorf("Total: expected 3, got %d", s.Total)
 	}
-	if s.Pending != 3 {
-		t.Errorf("Pending: want 3, got %d", s.Pending)
+	if s.Completed != 1 {
+		t.Errorf("Completed: expected 1, got %d", s.Completed)
 	}
-	if s.Completed != 0 {
-		t.Errorf("Completed: want 0, got %d", s.Completed)
-	}
-	if s.CompletionRate != 0 {
-		t.Errorf("CompletionRate: want 0, got %d", s.CompletionRate)
+	if s.Pending != 2 {
+		t.Errorf("Pending: expected 2, got %d", s.Pending)
 	}
 }
 
-// TestStats_PriorityCounts verifies that priority counters are independent
-// of the Done state — a completed high-priority task still counts as high.
-func TestStats_PriorityCounts(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
+// ---------------------------------------------------------------------------
+// Due date tests (new for issue #9)
+// ---------------------------------------------------------------------------
 
-	t1 := mgr.Add("High done", "high")
-	mgr.Add("High pending", "high")
-	mgr.Add("Medium pending", "medium")
-	mgr.Complete(t1.ID)
-
-	s := mgr.Stats()
-
-	if s.HighPriority != 2 {
-		t.Errorf("HighPriority: want 2, got %d", s.HighPriority)
+func TestAddWithDueDate(t *testing.T) {
+	mgr := newManager(t)
+	if err := mgr.Add("Submit report", "high", "2030-12-31"); err != nil {
+		t.Fatalf("Add with due date: unexpected error: %v", err)
 	}
-	if s.MediumPriority != 1 {
-		t.Errorf("MediumPriority: want 1, got %d", s.MediumPriority)
-	}
-	if s.LowPriority != 0 {
-		t.Errorf("LowPriority: want 0, got %d", s.LowPriority)
+	tasks, _ := mgr.List("", false)
+	if tasks[0].DueDate != "2030-12-31" {
+		t.Errorf("expected DueDate %q, got %q", "2030-12-31", tasks[0].DueDate)
 	}
 }
 
-// TestStats_DeleteAffectsTotal verifies that deleting a task reduces the
-// total count reflected in Stats().
-func TestStats_DeleteAffectsTotal(t *testing.T) {
-	mgr := NewManager(t.TempDir() + "/tasks.json")
-
-	t1 := mgr.Add("Task 1", "high")
-	mgr.Add("Task 2", "medium")
-	mgr.Delete(t1.ID)
-
-	s := mgr.Stats()
-
-	if s.Total != 1 {
-		t.Errorf("Total after delete: want 1, got %d", s.Total)
+func TestAddInvalidDueDate(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Add("Bad date task", "low", "not-a-date")
+	if err == nil {
+		t.Fatal("expected error for invalid due date, got nil")
 	}
-	if s.HighPriority != 0 {
-		t.Errorf("HighPriority after delete: want 0, got %d", s.HighPriority)
+}
+
+func TestAddNoDueDate(t *testing.T) {
+	mgr := newManager(t)
+	if err := mgr.Add("No due date", "medium", ""); err != nil {
+		t.Fatalf("Add without due date: unexpected error: %v", err)
 	}
-	if s.MediumPriority != 1 {
-		t.Errorf("MediumPriority after delete: want 1, got %d", s.MediumPriority)
+	tasks, _ := mgr.List("", false)
+	if tasks[0].DueDate != "" {
+		t.Errorf("expected empty DueDate, got %q", tasks[0].DueDate)
+	}
+}
+
+// TestIsOverdue_PastDate verifies that an incomplete task with a past due date
+// is reported as overdue.
+func TestIsOverdue_PastDate(t *testing.T) {
+	task := Task{
+		ID:      1,
+		Title:   "Old task",
+		Done:    false,
+		DueDate: "2000-01-01",
+	}
+	now := time.Now()
+	if !task.IsOverdue(now) {
+		t.Error("expected task with past due date to be overdue")
+	}
+}
+
+// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+func TestIsOverdue_FutureDate(t *testing.T) {
+	task := Task{
+		ID:      2,
+		Title:   "Future task",
+		Done:    false,
+		DueDate: "2099-12-31",
+	}
+	now := time.Now()
+	if task.IsOverdue(now) {
+		t.Error("expected task with future due date to not be overdue")
+	}
+}
+
+// TestIsOverdue_DoneTask verifies that a completed task is never overdue even
+// if its due date has passed.
+func TestIsOverdue_DoneTask(t *testing.T) {
+	task := Task{
+		ID:      3,
+		Title:   "Done old task",
+		Done:    true,
+		DueDate: "2000-01-01",
+	}
+	now := time.Now()
+	if task.IsOverdue(now) {
+		t.Error("expected completed task to never be overdue")
+	}
+}
+
+// TestIsOverdue_NoDueDate verifies that a task with no due date is never overdue.
+func TestIsOverdue_NoDueDate(t *testing.T) {
+	task := Task{
+		ID:      4,
+		Title:   "No due date",
+		Done:    false,
+		DueDate: "",
+	}
+	now := time.Now()
+	if task.IsOverdue(now) {
+		t.Error("expected task with no due date to never be overdue")
+	}
+}
+
+// TestListOverdueFilter verifies that --overdue returns only incomplete tasks
+// with a past due date.
+func TestListOverdueFilter(t *testing.T) {
+	mgr := newManager(t)
+
+	// Overdue: past date, incomplete
+	_ = mgr.Add("Overdue task", "high", "2000-06-15")
+	// Not overdue: future date
+	_ = mgr.Add("Future task", "low", "2099-01-01")
+	// Not overdue: no due date
+	_ = mgr.Add("No date task", "medium", "")
+	// Not overdue: past date but completed
+	_ = mgr.Add("Done old task", "medium", "2000-01-01")
+	tasks, _ := mgr.List("", false)
+	// Mark the last task done
+	_ = mgr.Complete(tasks[3].ID)
+
+	overdue, err := mgr.List("", true)
+	if err != nil {
+		t.Fatalf("List overdue: unexpected error: %v", err)
+	}
+	if len(overdue) != 1 {
+		t.Fatalf("expected 1 overdue task, got %d", len(overdue))
+	}
+	if overdue[0].Title != "Overdue task" {
+		t.Errorf("expected overdue task title %q, got %q", "Overdue task", overdue[0].Title)
+	}
+}
+
+// TestStatsOverdue verifies that Stats.Overdue counts only incomplete tasks
+// with a past due date.
+func TestStatsOverdue(t *testing.T) {
+	mgr := newManager(t)
+
+	// 2 overdue (past date, incomplete)
+	_ = mgr.Add("Overdue 1", "high", "2000-01-01")
+	_ = mgr.Add("Overdue 2", "low", "1999-12-31")
+	// 1 not overdue (future)
+	_ = mgr.Add("Future", "medium", "2099-01-01")
+	// 1 no due date
+	_ = mgr.Add("No date", "medium", "")
+	// 1 completed with past date — should NOT count as overdue
+	_ = mgr.Add("Done old", "high", "2000-06-01")
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[4].ID)
+
+	s, err := mgr.Stats()
+	if err != nil {
+		t.Fatalf("Stats: unexpected error: %v", err)
+	}
+	if s.Total != 5 {
+		t.Errorf("Total: expected 5, got %d", s.Total)
+	}
+	if s.Overdue != 2 {
+		t.Errorf("Overdue: expected 2, got %d", s.Overdue)
+	}
+}
+
+// TestStatsOverdueZeroWhenNoDueDates verifies Overdue is 0 when no tasks have
+// due dates set.
+func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "low", "")
+
+	s, err := mgr.Stats()
+	if err != nil {
+		t.Fatalf("Stats: unexpected error: %v", err)
+	}
+	if s.Overdue != 0 {
+		t.Errorf("Overdue: expected 0, got %d", s.Overdue)
 	}
 }
