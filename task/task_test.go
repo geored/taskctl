@@ -13,7 +13,7 @@ func newManager(t *testing.T) *Manager {
 }
 
 // ---------------------------------------------------------------------------
-// Existing functionality tests (preserved + upgraded to t.TempDir())
+// Existing functionality tests (preserved)
 // ---------------------------------------------------------------------------
 
 func TestAdd(t *testing.T) {
@@ -137,9 +137,11 @@ func TestStatsMixed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Due date tests (new for issue #9)
+// Due date tests (issue #9)
 // ---------------------------------------------------------------------------
 
+// TestAddWithDueDate verifies that a valid due date is stored and retrieved
+// correctly.
 func TestAddWithDueDate(t *testing.T) {
 	mgr := newManager(t)
 	if err := mgr.Add("Submit report", "high", "2030-12-31"); err != nil {
@@ -151,6 +153,7 @@ func TestAddWithDueDate(t *testing.T) {
 	}
 }
 
+// TestAddInvalidDueDate verifies that a non-date string is rejected.
 func TestAddInvalidDueDate(t *testing.T) {
 	mgr := newManager(t)
 	err := mgr.Add("Bad date task", "low", "not-a-date")
@@ -159,6 +162,7 @@ func TestAddInvalidDueDate(t *testing.T) {
 	}
 }
 
+// TestAddNoDueDate verifies that omitting a due date stores an empty string.
 func TestAddNoDueDate(t *testing.T) {
 	mgr := newManager(t)
 	if err := mgr.Add("No due date", "medium", ""); err != nil {
@@ -173,28 +177,29 @@ func TestAddNoDueDate(t *testing.T) {
 // TestIsOverdue_PastDate verifies that an incomplete task with a past due date
 // is reported as overdue.
 func TestIsOverdue_PastDate(t *testing.T) {
-	task := Task{
+	tk := Task{
 		ID:      1,
 		Title:   "Old task",
 		Done:    false,
 		DueDate: "2000-01-01",
 	}
 	now := time.Now()
-	if !task.IsOverdue(now) {
+	if !tk.IsOverdue(now) {
 		t.Error("expected task with past due date to be overdue")
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that a task due in the future is not
+// overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
-	task := Task{
+	tk := Task{
 		ID:      2,
 		Title:   "Future task",
 		Done:    false,
 		DueDate: "2099-12-31",
 	}
 	now := time.Now()
-	if task.IsOverdue(now) {
+	if tk.IsOverdue(now) {
 		t.Error("expected task with future due date to not be overdue")
 	}
 }
@@ -202,47 +207,49 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 // TestIsOverdue_DoneTask verifies that a completed task is never overdue even
 // if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
-	task := Task{
+	tk := Task{
 		ID:      3,
 		Title:   "Done old task",
 		Done:    true,
 		DueDate: "2000-01-01",
 	}
 	now := time.Now()
-	if task.IsOverdue(now) {
+	if tk.IsOverdue(now) {
 		t.Error("expected completed task to never be overdue")
 	}
 }
 
-// TestIsOverdue_NoDueDate verifies that a task with no due date is never overdue.
+// TestIsOverdue_NoDueDate verifies that a task with no due date is never
+// overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
-	task := Task{
+	tk := Task{
 		ID:      4,
 		Title:   "No due date",
 		Done:    false,
 		DueDate: "",
 	}
 	now := time.Now()
-	if task.IsOverdue(now) {
+	if tk.IsOverdue(now) {
 		t.Error("expected task with no due date to never be overdue")
 	}
 }
 
-// TestListOverdueFilter verifies that --overdue returns only incomplete tasks
-// with a past due date.
+// TestListOverdueFilter verifies that overdueOnly=true returns only incomplete
+// tasks with a past due date.
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
 
-	// Overdue: past date, incomplete
+	// Overdue: past date, incomplete.
 	_ = mgr.Add("Overdue task", "high", "2000-06-15")
-	// Not overdue: future date
+	// Not overdue: future date.
 	_ = mgr.Add("Future task", "low", "2099-01-01")
-	// Not overdue: no due date
+	// Not overdue: no due date.
 	_ = mgr.Add("No date task", "medium", "")
-	// Not overdue: past date but completed
+	// Not overdue: past date but completed.
 	_ = mgr.Add("Done old task", "medium", "2000-01-01")
+
 	tasks, _ := mgr.List("", false)
-	// Mark the last task done
+	// Mark the last task (Done old task) as complete.
 	_ = mgr.Complete(tasks[3].ID)
 
 	overdue, err := mgr.List("", true)
@@ -262,15 +269,16 @@ func TestListOverdueFilter(t *testing.T) {
 func TestStatsOverdue(t *testing.T) {
 	mgr := newManager(t)
 
-	// 2 overdue (past date, incomplete)
+	// 2 overdue (past date, incomplete).
 	_ = mgr.Add("Overdue 1", "high", "2000-01-01")
 	_ = mgr.Add("Overdue 2", "low", "1999-12-31")
-	// 1 not overdue (future)
+	// 1 not overdue (future date).
 	_ = mgr.Add("Future", "medium", "2099-01-01")
-	// 1 no due date
+	// 1 no due date — never overdue.
 	_ = mgr.Add("No date", "medium", "")
-	// 1 completed with past date — should NOT count as overdue
+	// 1 completed with past date — should NOT count as overdue.
 	_ = mgr.Add("Done old", "high", "2000-06-01")
+
 	tasks, _ := mgr.List("", false)
 	_ = mgr.Complete(tasks[4].ID)
 
