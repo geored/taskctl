@@ -13,13 +13,13 @@ const dateLayout = "2006-01-02"
 
 // Task represents a single to-do item.
 type Task struct {
-	ID        int    `json:"id"`
-	Title     string `json:"title"`
-	Done      bool   `json:"done"`
-	Priority  string `json:"priority"`
+	ID       int    `json:"id"`
+	Title    string `json:"title"`
+	Done     bool   `json:"done"`
+	Priority string `json:"priority"`
 	// DueDate holds an optional due date in YYYY-MM-DD format.
 	// An empty string means no due date has been set.
-	DueDate   string `json:"due_date,omitempty"`
+	DueDate string `json:"due_date,omitempty"`
 }
 
 // IsOverdue reports whether the task is incomplete and its due date has passed
@@ -171,6 +171,11 @@ type Stats struct {
 	Pending   int
 	// Overdue is the number of incomplete tasks whose due date has passed.
 	Overdue int
+
+	// Priority breakdown — counts include both pending and completed tasks.
+	HighPriority   int
+	MediumPriority int
+	LowPriority    int
 }
 
 // Stats computes summary statistics for all tasks in a single pass.
@@ -178,6 +183,9 @@ type Stats struct {
 //
 //	pct := 0
 //	if s.Total > 0 { pct = s.Completed * 100 / s.Total }
+//
+// Priority counts (HighPriority, MediumPriority, LowPriority) include both
+// pending and completed tasks so they always sum to Total.
 func (m *Manager) Stats() (Stats, error) {
 	tasks, err := m.load()
 	if err != nil {
@@ -188,6 +196,7 @@ func (m *Manager) Stats() (Stats, error) {
 	var s Stats
 	s.Total = len(tasks)
 	for _, t := range tasks {
+		// Completion / pending / overdue counts.
 		if t.Done {
 			s.Completed++
 		} else {
@@ -195,6 +204,16 @@ func (m *Manager) Stats() (Stats, error) {
 			if t.IsOverdue(now) {
 				s.Overdue++
 			}
+		}
+
+		// Priority breakdown — tallied regardless of done state.
+		switch t.Priority {
+		case "high":
+			s.HighPriority++
+		case "medium":
+			s.MediumPriority++
+		case "low":
+			s.LowPriority++
 		}
 	}
 	return s, nil
