@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"taskctl/task"
+	"github.com/geored/taskctl/task"
 )
 
 func main() {
@@ -169,6 +169,8 @@ func runDelete(mgr *task.Manager, args []string) {
 }
 
 // runStats handles the "stats" sub-command.
+// It prints a summary that includes completion counts, overdue count,
+// per-priority task counts, and the overall completion rate.
 func runStats(mgr *task.Manager) {
 	s, err := mgr.Stats()
 	if err != nil {
@@ -182,8 +184,11 @@ func runStats(mgr *task.Manager) {
 	}
 
 	fmt.Printf("Total tasks:     %d\n", s.Total)
-	fmt.Printf("Completed:       %d\n", s.Completed)
-	fmt.Printf("Pending:         %d\n", s.Pending)
-	fmt.Printf("Overdue:         %d\n", s.Overdue)
-	fmt.Printf("Completion:      %d%%\n", pct)
+	fmt.Printf("  Pending:       %d\n", s.Pending)
+	fmt.Printf("  Completed:     %d\n", s.Completed)
+	fmt.Printf("  Overdue:       %d\n", s.Overdue)
+	fmt.Printf("  High priority: %d\n", s.HighPriority)
+	fmt.Printf("  Med priority:  %d\n", s.MediumPriority)
+	fmt.Printf("  Low priority:  %d\n", s.LowPriority)
+	fmt.Printf("Completion rate: %d%%\n", pct)
 }
