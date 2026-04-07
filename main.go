@@ -101,6 +101,17 @@ func main() {
 		}
 		fmt.Printf("Task #%d deleted.\n", id)
 
+	case "stats":
+		// Compute and display summary statistics for all tasks.
+		s := mgr.Stats()
+		fmt.Printf("Total tasks: %d\n", s.Total)
+		fmt.Printf("  Pending:         %d\n", s.Pending)
+		fmt.Printf("  Completed:       %d\n", s.Completed)
+		fmt.Printf("  High priority:   %d\n", s.HighPriority)
+		fmt.Printf("  Medium priority: %d\n", s.MediumPriority)
+		fmt.Printf("  Low priority:    %d\n", s.LowPriority)
+		fmt.Printf("Completion rate: %d%%\n", s.CompletionRate)
+
 	default:
 		printUsage()
 		os.Exit(1)
@@ -115,4 +126,5 @@ func printUsage() {
 	fmt.Println("  taskctl list [--priority high|medium|low]")
 	fmt.Println("  taskctl done <id>")
 	fmt.Println("  taskctl delete <id>")
+	fmt.Println("  taskctl stats")
 }
