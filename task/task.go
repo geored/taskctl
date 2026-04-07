@@ -27,6 +27,12 @@ type Stats struct {
 	CompletionRate int // percentage, 0-100
 }
 
+// ClearResult holds the outcome of a Clear operation.
+type ClearResult struct {
+	Cleared   int // number of completed tasks removed
+	Remaining int // number of tasks still in the store
+}
+
 // Manager handles persistence and operations on the task list.
 type Manager struct {
 	filepath string
@@ -103,6 +109,31 @@ func (m *Manager) Delete(id int) error {
 		}
 	}
 	return fmt.Errorf("task #%d not found", id)
+}
+
+// Clear removes all tasks that are marked as done and persists the result.
+// It returns a ClearResult describing how many tasks were removed and how
+// many remain in the store after the operation.
+func (m *Manager) Clear() ClearResult {
+	var remaining []Task
+	cleared := 0
+
+	for _, t := range m.tasks {
+		if t.Done {
+			cleared++
+		} else {
+			remaining = append(remaining, t)
+		}
+	}
+
+	// Replace the task list with only the pending tasks and persist.
+	m.tasks = remaining
+	m.save()
+
+	return ClearResult{
+		Cleared:   cleared,
+		Remaining: len(remaining),
+	}
 }
 
 // Stats computes and returns summary statistics for all tasks currently
