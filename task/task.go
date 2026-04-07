@@ -4,151 +4,156 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
+	"strings"
 )
 
-// Task represents a single task item with a priority level.
+// Priority levels supported by the task manager.
+const (
+	PriorityLow    = "low"
+	PriorityMedium = "medium"
+	PriorityHigh   = "high"
+)
+
+// Task represents a single to-do item.
 type Task struct {
-	ID        int       `json:"id"`
-	Title     string    `json:"title"`
-	Priority  string    `json:"priority"`
-	Done      bool      `json:"done"`
-	CreatedAt time.Time `json:"created_at"`
+	ID       int    `json:"id"`
+	Title    string `json:"title"`
+	Priority string `json:"priority"`
+	Done     bool   `json:"done"`
 }
 
-// Stats holds summary statistics for the current task list.
-type Stats struct {
-	Total          int
-	Pending        int
-	Completed      int
-	HighPriority   int
-	MediumPriority int
-	LowPriority    int
-	CompletionRate int // percentage, 0-100
-}
-
-// Manager handles persistence and operations on the task list.
+// Manager handles persistence and business logic for a collection of tasks.
+// Tasks are stored as JSON in the file at FilePath.
 type Manager struct {
-	filepath string
+	FilePath string
 	tasks    []Task
-	nextID   int
 }
 
-// NewManager creates a Manager backed by the given JSON file path and
-// loads any previously persisted tasks from disk.
-func NewManager(filepath string) *Manager {
-	m := &Manager{filepath: filepath}
-	m.load()
-	return m
-}
-
-// Add creates a new task with the given title and priority, persists it,
-// and returns the created Task.
-func (m *Manager) Add(title, priority string) Task {
-	t := Task{
-		ID:        m.nextID,
-		Title:     title,
-		Priority:  priority,
-		Done:      false,
-		CreatedAt: time.Now(),
+// NewManager creates a Manager backed by the given file path and loads any
+// previously persisted tasks from disk.
+func NewManager(filePath string) (*Manager, error) {
+	m := &Manager{FilePath: filePath}
+	if err := m.load(); err != nil {
+		return nil, err
 	}
-	m.nextID++
-	m.tasks = append(m.tasks, t)
-	m.save()
-	return t
+	return m, nil
 }
 
-// List returns all tasks regardless of priority.
+// load reads tasks from the JSON file.  A missing file is treated as an empty
+// store (not an error).
+func (m *Manager) load() error {
+	data, err := os.ReadFile(m.FilePath)
+	if os.IsNotExist(err) {
+		m.tasks = make([]Task, 0)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load tasks: %w", err)
+	}
+	return json.Unmarshal(data, &m.tasks)
+}
+
+// save persists the current task list to disk as JSON.
+func (m *Manager) save() error {
+	data, err := json.MarshalIndent(m.tasks, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal tasks: %w", err)
+	}
+	if err := os.WriteFile(m.FilePath, data, 0644); err != nil {
+		return fmt.Errorf("save tasks: %w", err)
+	}
+	return nil
+}
+
+// Add creates a new task with the given title and priority, appends it to the
+// store, and persists the change.
+func (m *Manager) Add(title, priority string) (Task, error) {
+	id := 1
+	if len(m.tasks) > 0 {
+		id = m.tasks[len(m.tasks)-1].ID + 1
+	}
+	t := Task{ID: id, Title: title, Priority: priority}
+	m.tasks = append(m.tasks, t)
+	return t, m.save()
+}
+
+// List returns all tasks in the store.
 func (m *Manager) List() []Task {
 	return m.tasks
 }
 
-// FilterByPriority returns only the tasks whose Priority field matches
-// the supplied priority string (case-sensitive: "high", "medium", "low").
-// An empty slice is returned when no tasks match.
+// FilterByPriority returns only the tasks whose Priority matches the given
+// value (case-insensitive).
 func (m *Manager) FilterByPriority(priority string) []Task {
-	var filtered []Task
+	result := make([]Task, 0)
+	lower := strings.ToLower(priority)
 	for _, t := range m.tasks {
-		if t.Priority == priority {
-			filtered = append(filtered, t)
+		if strings.ToLower(t.Priority) == lower {
+			result = append(result, t)
 		}
 	}
-	// Return an initialised empty slice instead of nil so callers can
-	// safely range over the result without a nil-check.
-	if filtered == nil {
-		return []Task{}
+	return result
+}
+
+// Search returns all tasks whose Title contains keyword as a case-insensitive
+// substring.  The original store is never modified.
+func (m *Manager) Search(keyword string) []Task {
+	result := make([]Task, 0)
+	lower := strings.ToLower(keyword)
+	for _, t := range m.tasks {
+		if strings.Contains(strings.ToLower(t.Title), lower) {
+			result = append(result, t)
+		}
 	}
-	return filtered
+	return result
 }
 
 // Complete marks the task with the given ID as done and persists the change.
+// It returns an error if no task with that ID exists.
 func (m *Manager) Complete(id int) error {
-	for i := range m.tasks {
-		if m.tasks[i].ID == id {
+	for i, t := range m.tasks {
+		if t.ID == id {
 			m.tasks[i].Done = true
-			m.save()
-			return nil
+			return m.save()
 		}
 	}
-	return fmt.Errorf("task #%d not found", id)
+	return fmt.Errorf("task %d not found", id)
 }
 
-// Delete removes the task with the given ID and persists the change.
+// Delete removes the task with the given ID from the store and persists the
+// change.  It returns an error if no task with that ID exists.
 func (m *Manager) Delete(id int) error {
-	for i := range m.tasks {
-		if m.tasks[i].ID == id {
+	for i, t := range m.tasks {
+		if t.ID == id {
 			m.tasks = append(m.tasks[:i], m.tasks[i+1:]...)
-			m.save()
-			return nil
+			return m.save()
 		}
 	}
-	return fmt.Errorf("task #%d not found", id)
+	return fmt.Errorf("task %d not found", id)
 }
 
-// Stats computes and returns summary statistics for all tasks currently
-// held by the Manager. The CompletionRate field is an integer percentage
-// (0-100); it is 0 when there are no tasks.
-func (m *Manager) Stats() Stats {
-	s := Stats{}
-	s.Total = len(m.tasks)
+// Stats holds aggregate counts computed from the current task store.
+type Stats struct {
+	Total     int
+	Completed int
+	Pending   int
+	// CompletionRate is the percentage of completed tasks (0 when Total == 0).
+	CompletionRate float64
+}
 
+// Stats computes and returns summary statistics for the current task store.
+// The calculation is a single O(n) pass and is safe when the store is empty.
+func (m *Manager) Stats() Stats {
+	var s Stats
+	s.Total = len(m.tasks)
 	for _, t := range m.tasks {
 		if t.Done {
 			s.Completed++
-		} else {
-			s.Pending++
-		}
-		switch t.Priority {
-		case "high":
-			s.HighPriority++
-		case "medium":
-			s.MediumPriority++
-		case "low":
-			s.LowPriority++
 		}
 	}
-
+	s.Pending = s.Total - s.Completed
 	if s.Total > 0 {
-		s.CompletionRate = (s.Completed * 100) / s.Total
+		s.CompletionRate = float64(s.Completed) / float64(s.Total) * 100
 	}
 	return s
-}
-
-func (m *Manager) load() {
-	data, err := os.ReadFile(m.filepath)
-	if err != nil {
-		m.nextID = 1
-		return
-	}
-	json.Unmarshal(data, &m.tasks)
-	for _, t := range m.tasks {
-		if t.ID >= m.nextID {
-			m.nextID = t.ID + 1
-		}
-	}
-}
-
-func (m *Manager) save() {
-	data, _ := json.MarshalIndent(m.tasks, "", "  ")
-	os.WriteFile(m.filepath, data, 0644)
 }
