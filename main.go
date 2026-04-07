@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"taskctl/task"
 )
@@ -41,7 +42,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage: taskctl <command> [options]
 
 Commands:
-  add     --priority <low|medium|high> [--due YYYY-MM-DD] <title>
+  add     [--priority <low|medium|high>] [--due YYYY-MM-DD] <title>
   list    [--priority <low|medium|high>] [--overdue]
   done    <id>
   delete  <id>
@@ -104,6 +105,8 @@ func runList(mgr *task.Manager, args []string) {
 		return
 	}
 
+	now := time.Now()
+
 	// Header
 	fmt.Printf("%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
 	fmt.Println("------------------------------------------------------")
@@ -121,7 +124,7 @@ func runList(mgr *task.Manager, args []string) {
 
 		// Append an [OVERDUE] marker for incomplete tasks past their due date.
 		title := t.Title
-		if t.IsOverdue(timeNow()) {
+		if t.IsOverdue(now) {
 			title += " [OVERDUE]"
 		}
 
