@@ -16,6 +16,17 @@ type Task struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Stats holds summary statistics for the current task list.
+type Stats struct {
+	Total          int
+	Pending        int
+	Completed      int
+	HighPriority   int
+	MediumPriority int
+	LowPriority    int
+	CompletionRate int // percentage, 0-100
+}
+
 // Manager handles persistence and operations on the task list.
 type Manager struct {
 	filepath string
@@ -92,6 +103,35 @@ func (m *Manager) Delete(id int) error {
 		}
 	}
 	return fmt.Errorf("task #%d not found", id)
+}
+
+// Stats computes and returns summary statistics for all tasks currently
+// held by the Manager. The CompletionRate field is an integer percentage
+// (0-100); it is 0 when there are no tasks.
+func (m *Manager) Stats() Stats {
+	s := Stats{}
+	s.Total = len(m.tasks)
+
+	for _, t := range m.tasks {
+		if t.Done {
+			s.Completed++
+		} else {
+			s.Pending++
+		}
+		switch t.Priority {
+		case "high":
+			s.HighPriority++
+		case "medium":
+			s.MediumPriority++
+		case "low":
+			s.LowPriority++
+		}
+	}
+
+	if s.Total > 0 {
+		s.CompletionRate = (s.Completed * 100) / s.Total
+	}
+	return s
 }
 
 func (m *Manager) load() {
