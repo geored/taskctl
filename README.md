@@ -19,6 +19,7 @@
   - [list](#list)
   - [complete](#complete)
   - [delete](#delete)
+  - [stats](#stats)
 - [Examples](#examples)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -41,6 +42,7 @@
 | 🔍 **Filter by priority** | Use `--priority` to show only `low`, `medium`, or `high` priority tasks |
 | ✅ **Complete tasks** | Mark a task as done by its ID |
 | 🗑️ **Delete tasks** | Remove a task permanently by its ID |
+| 📊 **Task statistics** | View total, pending, completed counts and completion rate with `stats` |
 
 ---
 
@@ -209,6 +211,37 @@ taskctl delete 7
 
 ---
 
+### `stats`
+
+Display a summary of all tasks, including counts by status and priority, and the overall completion rate.
+
+```
+taskctl stats
+```
+
+No flags are accepted — `stats` always reports on the full task list.
+
+**Example output:**
+
+```
+Total tasks: 12
+  Pending:         8
+  Completed:       4
+  High priority:   3
+  Medium priority: 6
+  Low priority:    3
+Completion rate: 33%
+```
+
+**Notes:**
+
+- **Pending** = tasks not yet marked done.
+- **Completed** = tasks marked done via `taskctl done <id>`.
+- **Completion rate** is an integer percentage: `(completed / total) * 100`. It is `0%` when there are no tasks.
+- Priority counts include both pending and completed tasks.
+
+---
+
 ## Examples
 
 A full end-to-end workflow:
@@ -283,6 +316,7 @@ The test suite covers:
 - Marking tasks as complete
 - Deleting tasks
 - Edge cases (invalid IDs, unknown priority values)
+- Task statistics (`stats` command): empty store, mixed tasks, all completed, completion rate
 
 ---
 
@@ -295,7 +329,7 @@ taskctl/
 ├── Dockerfile       # Multi-stage Docker build
 ├── .gitignore       # Git ignore rules
 └── task/
-    ├── task.go      # Core task logic: Task struct, storage, CRUD, filtering
+    ├── task.go      # Core task logic: Task struct, storage, CRUD, filtering, stats
     └── task_test.go # Unit tests for the task package
 ```
 
