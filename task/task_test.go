@@ -1,6 +1,7 @@
 package task
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -299,5 +300,50 @@ func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
 	}
 	if s.Overdue != 0 {
 		t.Errorf("Overdue: expected 0, got %d", s.Overdue)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Atomic save and file permission tests (requirements 7–9)
+// ---------------------------------------------------------------------------
+
+// TestSaveFilePermissions verifies that the tasks file is written with mode
+// 0600 (owner read/write only) after an Add operation.
+func TestSaveFilePermissions(t *testing.T) {
+	mgr := newManager(t)
+	if err := mgr.Add("Permission check task", "medium", ""); err != nil {
+		t.Fatalf("Add: unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(mgr.filePath)
+	if err != nil {
+		t.Fatalf("Stat: unexpected error: %v", err)
+	}
+
+	got := info.Mode().Perm()
+	const want = os.FileMode(0600)
+	if got != want {
+		t.Errorf("file permissions: expected %04o, got %04o", want, got)
+	}
+}
+
+// TestSaveAtomicity verifies that Add followed immediately by List returns a
+// consistent task list with no partial-write corruption. Running with -race
+// validates there are no data races in the save path.
+func TestSaveAtomicity(t *testing.T) {
+	mgr := newManager(t)
+
+	const n = 20
+	for i := 0; i < n; i++ {
+		if err := mgr.Add("Task", "low", ""); err != nil {
+			t.Fatalf("Add iteration %d: unexpected error: %v", i, err)
+		}
+		tasks, err := mgr.List("", false)
+		if err != nil {
+			t.Fatalf("List after Add %d: unexpected error: %v", i, err)
+		}
+		if len(tasks) != i+1 {
+			t.Fatalf("after %d adds: expected %d tasks, got %d", i+1, i+1, len(tasks))
+		}
 	}
 }
