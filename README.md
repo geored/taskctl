@@ -1,8 +1,8 @@
 # taskctl
 
-> A lightweight, fast command-line task manager written in Go — with priority-based filtering built in.
+> A lightweight, fast command-line task manager written in Go — with priority-based filtering and due-date tracking built in.
 
-[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
@@ -17,7 +17,7 @@
 - [CLI Reference](#cli-reference)
   - [add](#add)
   - [list](#list)
-  - [complete](#complete)
+  - [done](#done)
   - [delete](#delete)
   - [stats](#stats)
 - [Examples](#examples)
@@ -29,7 +29,7 @@
 
 ## Overview
 
-**taskctl** is a minimal, dependency-free CLI tool for managing your tasks directly from the terminal. Tasks are stored locally and can be tagged with a priority level (`low`, `medium`, or `high`), making it easy to focus on what matters most. The `--priority` filter lets you instantly surface only the tasks that match a given urgency level.
+**taskctl** is a minimal, dependency-free CLI tool for managing your tasks directly from the terminal. Tasks are stored locally and can be tagged with a priority level (`low`, `medium`, or `high`) and an optional due date (`YYYY-MM-DD`), making it easy to focus on what matters most. The `--priority` filter lets you instantly surface only the tasks that match a given urgency level, and `--overdue` shows tasks that have passed their due date.
 
 ---
 
@@ -38,11 +38,13 @@
 | Feature | Description |
 |---|---|
 | ➕ **Add tasks** | Create a new task with a title and optional priority level |
-| 📋 **List tasks** | Display all tasks with their ID, status, priority, and title |
+| 📋 **List tasks** | Display all tasks with their ID, status, priority, due date, and title |
 | 🔍 **Filter by priority** | Use `--priority` to show only `low`, `medium`, or `high` priority tasks |
 | ✅ **Complete tasks** | Mark a task as done by its ID |
 | 🗑️ **Delete tasks** | Remove a task permanently by its ID |
-| 📊 **Task statistics** | View total, pending, completed counts and completion rate with `stats` |
+| 📊 **Task statistics** | View total, pending, completed, overdue counts and completion rate with `stats` |
+| 📅 **Due dates** | Attach an optional due date (YYYY-MM-DD) to any task with `--due` |
+| ⚠️ **Overdue detection** | Tasks past their due date are flagged `[OVERDUE]`; filter with `--overdue` |
 
 ---
 
@@ -50,7 +52,7 @@
 
 ### From Source
 
-**Prerequisites:** [Go 1.21+](https://golang.org/dl/)
+**Prerequisites:** [Go 1.22+](https://golang.org/dl/)
 
 ```bash
 # Clone the repository
@@ -84,6 +86,9 @@ docker run --rm taskctl --help
 # Add a task
 docker run --rm taskctl add "Review pull requests" --priority high
 
+# Add a task with a due date
+docker run --rm taskctl add "Submit report" --priority high --due 2025-12-31
+
 # List all tasks
 docker run --rm taskctl list
 
@@ -102,15 +107,16 @@ docker run --rm taskctl list --priority high
 
 ### `add`
 
-Create a new task with a title and an optional priority.
+Create a new task with a title, an optional priority, and an optional due date.
 
 ```
-taskctl add <title> [--priority <level>]
+taskctl add <title> [--priority <level>] [--due YYYY-MM-DD]
 ```
 
 | Flag | Values | Default | Description |
 |---|---|---|---|
 | `--priority` | `low`, `medium`, `high` | `medium` | Set the urgency level of the task |
+| `--due` | `YYYY-MM-DD` | _(none)_ | Set an optional due date for the task |
 
 **Examples:**
 
@@ -126,21 +132,28 @@ taskctl add "Update dependencies" --priority low
 
 # Add a medium-priority task explicitly
 taskctl add "Refactor auth module" --priority medium
+
+# Add a task with a due date (and default priority)
+taskctl add "Submit quarterly report" --due 2025-03-31
+
+# Add a high-priority task with a due date
+taskctl add "Fix critical security patch" --priority high --due 2025-01-15
 ```
 
 ---
 
 ### `list`
 
-Display tasks. Without flags, all tasks are shown. Use `--priority` to filter.
+Display tasks. Without flags, all tasks are shown. Use `--priority` to filter by urgency, or `--overdue` to show only tasks past their due date.
 
 ```
-taskctl list [--priority <level>]
+taskctl list [--priority <level>] [--overdue]
 ```
 
 | Flag | Values | Default | Description |
 |---|---|---|---|
 | `--priority` | `low`, `medium`, `high` | _(none — shows all)_ | Filter tasks by priority level |
+| `--overdue` | _(boolean flag)_ | `false` | Show only incomplete tasks whose due date has passed |
 
 **Examples:**
 
@@ -156,37 +169,42 @@ taskctl list --priority medium
 
 # List only low-priority tasks
 taskctl list --priority low
+
+# List only overdue tasks
+taskctl list --overdue
 ```
 
 **Sample output (`taskctl list --priority high`):**
 
 ```
-ID   STATUS      PRIORITY   TITLE
-─────────────────────────────────────────────────
-1    [ ]         high       Fix production bug
-4    [ ]         high       Deploy hotfix to staging
-7    [✓]         high       Patch security vulnerability
+ID   Done   Priority Due Date     Title
+------------------------------------------------------
+1    [ ]    high     2025-01-15   Fix critical security patch [OVERDUE]
+4    [ ]    high     -            Deploy hotfix to staging
+7    [x]    high     2024-12-01   Patch security vulnerability
 ```
+
+> Tasks past their due date are flagged with `[OVERDUE]` in the title column. Tasks with no due date display `-` in the `Due Date` column.
 
 ---
 
-### `complete`
+### `done`
 
 Mark a task as completed by its numeric ID.
 
 ```
-taskctl complete <id>
+taskctl done <id>
 ```
 
 **Examples:**
 
 ```bash
-# Mark task 3 as complete
-taskctl complete 3
+# Mark task 3 as done
+taskctl done 3
 
-# Mark multiple tasks complete (run sequentially)
-taskctl complete 1
-taskctl complete 5
+# Mark multiple tasks done (run sequentially)
+taskctl done 1
+taskctl done 5
 ```
 
 ---
@@ -224,21 +242,23 @@ No flags are accepted — `stats` always reports on the full task list.
 **Example output:**
 
 ```
-Total tasks: 12
-  Pending:         8
-  Completed:       4
-  High priority:   3
-  Medium priority: 6
-  Low priority:    3
-Completion rate: 33%
+Total tasks:     12
+  Pending:       7
+  Completed:     5
+  Overdue:       2
+  High priority: 3
+  Med priority:  6
+  Low priority:  3
+Completion rate: 41%
 ```
 
 **Notes:**
 
 - **Pending** = tasks not yet marked done.
 - **Completed** = tasks marked done via `taskctl done <id>`.
+- **Overdue** = incomplete tasks whose due date has passed.
 - **Completion rate** is an integer percentage: `(completed / total) * 100`. It is `0%` when there are no tasks.
-- Priority counts include both pending and completed tasks.
+- Priority counts (`High priority`, `Med priority`, `Low priority`) include both pending and completed tasks so they always sum to the total.
 
 ---
 
@@ -248,40 +268,60 @@ A full end-to-end workflow:
 
 ```bash
 # 1. Add some tasks
-taskctl add "Plan sprint" --priority high
-taskctl add "Write documentation" --priority medium
+taskctl add "Plan sprint" --priority high --due 2025-02-01
+taskctl add "Write documentation" --priority medium --due 2025-03-15
 taskctl add "Clean up old branches" --priority low
-taskctl add "Fix login bug" --priority high
+taskctl add "Fix login bug" --priority high --due 2025-01-20
 taskctl add "Update README" --priority medium
 
 # 2. View all tasks
 taskctl list
-# ID   STATUS   PRIORITY   TITLE
-# 1    [ ]      high       Plan sprint
-# 2    [ ]      medium     Write documentation
-# 3    [ ]      low        Clean up old branches
-# 4    [ ]      high       Fix login bug
-# 5    [ ]      medium     Update README
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 1    [ ]    high     2025-02-01   Plan sprint
+# 2    [ ]    medium   2025-03-15   Write documentation
+# 3    [ ]    low      -            Clean up old branches
+# 4    [ ]    high     2025-01-20   Fix login bug
+# 5    [ ]    medium   -            Update README
 
 # 3. Focus on high-priority items only
 taskctl list --priority high
-# ID   STATUS   PRIORITY   TITLE
-# 1    [ ]      high       Plan sprint
-# 4    [ ]      high       Fix login bug
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 1    [ ]    high     2025-02-01   Plan sprint
+# 4    [ ]    high     2025-01-20   Fix login bug
 
-# 4. Complete a task
-taskctl complete 1
-# ✓ Task 1 marked as complete.
+# 4. See which tasks are overdue
+taskctl list --overdue
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 4    [ ]    high     2025-01-20   Fix login bug [OVERDUE]
 
-# 5. Verify completion
+# 5. Complete a task
+taskctl done 1
+# Task 1 marked as done.
+
+# 6. Verify completion
 taskctl list --priority high
-# ID   STATUS   PRIORITY   TITLE
-# 1    [✓]      high       Plan sprint
-# 4    [ ]      high       Fix login bug
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 1    [x]    high     2025-02-01   Plan sprint
+# 4    [ ]    high     2025-01-20   Fix login bug [OVERDUE]
 
-# 6. Delete a task
+# 7. Delete a task
 taskctl delete 3
-# ✓ Task 3 deleted.
+# Task 3 deleted.
+
+# 8. Check statistics
+taskctl stats
+# Total tasks:     4
+#   Pending:       3
+#   Completed:     1
+#   Overdue:       1
+#   High priority: 2
+#   Med priority:  2
+#   Low priority:  0
+# Completion rate: 25%
 ```
 
 ---
@@ -311,12 +351,16 @@ go tool cover -html=coverage.out -o coverage.html
 The test suite covers:
 
 - Task creation with all priority levels
+- Task creation with and without due dates (including invalid date validation)
 - Listing tasks (unfiltered)
 - Filtering tasks by `low`, `medium`, and `high` priority
-- Marking tasks as complete
+- Filtering tasks by overdue status (`--overdue`)
+- Marking tasks as done
 - Deleting tasks
-- Edge cases (invalid IDs, unknown priority values)
-- Task statistics (`stats` command): empty store, mixed tasks, all completed, completion rate
+- Edge cases (invalid IDs, invalid date formats, no due date)
+- Task statistics (`stats` command): empty store, mixed tasks, all completed, completion rate, overdue counts
+- File permission verification (tasks file written with mode `0600`)
+- Atomic save correctness (no partial-write corruption)
 
 ---
 
@@ -336,21 +380,13 @@ taskctl/
 ### Key types (`task/task.go`)
 
 ```go
-// Priority represents the urgency level of a task.
-type Priority string
-
-const (
-    PriorityLow    Priority = "low"
-    PriorityMedium Priority = "medium"
-    PriorityHigh   Priority = "high"
-)
-
 // Task represents a single to-do item.
 type Task struct {
-    ID        int
-    Title     string
-    Priority  Priority
-    Completed bool
+    ID       int    `json:"id"`
+    Title    string `json:"title"`
+    Done     bool   `json:"done"`
+    Priority string `json:"priority"`
+    DueDate  string `json:"due_date,omitempty"`
 }
 ```
 

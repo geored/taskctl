@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -65,22 +66,56 @@ func (m *Manager) load() ([]Task, error) {
 	return tasks, nil
 }
 
-// save writes the task slice to disk as JSON.
+// save writes the task slice to disk as JSON using an atomic write-to-temp +
+// rename pattern. The file is created with mode 0600 (owner read/write only).
 func (m *Manager) save(tasks []Task) error {
 	data, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("save: marshal: %w", err)
 	}
-	if err := os.WriteFile(m.filePath, data, 0644); err != nil {
+
+	dir := filepath.Dir(m.filePath)
+	tmp, err := os.CreateTemp(dir, "tasks-*.tmp")
+	if err != nil {
+		return fmt.Errorf("save: create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	// Clean up the temp file on any error path; if Rename succeeded the file
+	// no longer exists under tmpName and Remove is a harmless no-op.
+	defer func() {
+		os.Remove(tmpName)
+	}()
+
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("save: chmod: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("save: write: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("save: close: %w", err)
+	}
+	if err := os.Rename(tmpName, m.filePath); err != nil {
+		return fmt.Errorf("save: rename: %w", err)
 	}
 	return nil
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
+// priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
-// Returns an error if dueDate is non-empty but cannot be parsed.
+// Returns an error if priority is invalid or dueDate is non-empty but cannot be parsed.
 func (m *Manager) Add(title, priority, dueDate string) error {
+	// Validate priority at the public API boundary.
+	switch priority {
+	case "high", "medium", "low":
+		// valid
+	default:
+		return fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
+	}
+
 	// Validate due date format when provided.
 	if dueDate != "" {
 		if _, err := time.Parse(dateLayout, dueDate); err != nil {
