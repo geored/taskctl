@@ -3,12 +3,20 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/geored/taskctl/task"
 )
+
+func init() {
+	// Remove the default timestamp prefix from log messages so that the CLI
+	// output is clean; the caller sees only the message itself.
+	log.SetFlags(0)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -31,7 +39,7 @@ func main() {
 	case "stats":
 		runStats(mgr)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
+		log.Printf("unknown command: %s", cmd)
 		printUsage()
 		os.Exit(1)
 	}
@@ -57,27 +65,25 @@ func runAdd(mgr *task.Manager, args []string) {
 	priority := fs.String("priority", "medium", "Task priority: low, medium, high")
 	due := fs.String("due", "", "Optional due date in YYYY-MM-DD format")
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Printf("add: %v", err)
 		os.Exit(1)
 	}
 
 	if fs.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "add: task title is required")
+		log.Print("add: task title is required")
 		os.Exit(1)
 	}
 
 	// Join remaining positional arguments as the title so that users do not
 	// need to quote multi-word titles.
-	title := ""
-	for i, a := range fs.Args() {
-		if i > 0 {
-			title += " "
-		}
-		title += a
+	title := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if title == "" {
+		log.Print("add: task title must not be empty")
+		os.Exit(1)
 	}
 
 	if err := mgr.Add(title, *priority, *due); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Printf("add: %v", err)
 		os.Exit(1)
 	}
 	fmt.Println("Task added.")
@@ -90,13 +96,24 @@ func runList(mgr *task.Manager, args []string) {
 	priority := fs.String("priority", "", "Filter by priority: low, medium, high")
 	overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Printf("list: %v", err)
 		os.Exit(1)
+	}
+
+	// Validate the --priority flag value at the CLI boundary.
+	if *priority != "" {
+		switch *priority {
+		case "low", "medium", "high":
+			// valid
+		default:
+			log.Printf("list: invalid priority %q: must be low, medium, or high", *priority)
+			os.Exit(1)
+		}
 	}
 
 	tasks, err := mgr.List(*priority, *overdueOnly)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Printf("list: %v", err)
 		os.Exit(1)
 	}
 
@@ -135,16 +152,16 @@ func runList(mgr *task.Manager, args []string) {
 // runDone handles the "done" sub-command.
 func runDone(mgr *task.Manager, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "done: task ID is required")
+		log.Print("done: task ID is required")
 		os.Exit(1)
 	}
 	id, err := strconv.Atoi(args[0])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "done: invalid task ID:", args[0])
+		log.Printf("done: invalid task ID: %s", args[0])
 		os.Exit(1)
 	}
 	if err := mgr.Complete(id); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Printf("done: %v", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Task %d marked as done.\n", id)
@@ -153,16 +170,16 @@ func runDone(mgr *task.Manager, args []string) {
 // runDelete handles the "delete" sub-command.
 func runDelete(mgr *task.Manager, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "delete: task ID is required")
+		log.Print("delete: task ID is required")
 		os.Exit(1)
 	}
 	id, err := strconv.Atoi(args[0])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "delete: invalid task ID:", args[0])
+		log.Printf("delete: invalid task ID: %s", args[0])
 		os.Exit(1)
 	}
 	if err := mgr.Delete(id); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Printf("delete: %v", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Task %d deleted.\n", id)
@@ -174,7 +191,7 @@ func runDelete(mgr *task.Manager, args []string) {
 func runStats(mgr *task.Manager) {
 	s, err := mgr.Stats()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		log.Printf("stats: %v", err)
 		os.Exit(1)
 	}
 

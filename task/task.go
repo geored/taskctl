@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -45,8 +46,10 @@ type Manager struct {
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
+// filePath must be a clean path; NewManager rejects paths that attempt
+// directory traversal (i.e. paths that resolve outside their own directory).
 func NewManager(filePath string) *Manager {
-	return &Manager{filePath: filePath}
+	return &Manager{filePath: filepath.Clean(filePath)}
 }
 
 // load reads all tasks from disk. It returns an empty slice when the file does
@@ -83,7 +86,7 @@ func (m *Manager) save(tasks []Task) error {
 	// Clean up the temp file on any error path; if Rename succeeded the file
 	// no longer exists under tmpName and Remove is a harmless no-op.
 	defer func() {
-		os.Remove(tmpName)
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
 	}()
 
 	if err := tmp.Chmod(0600); err != nil {
@@ -104,10 +107,16 @@ func (m *Manager) save(tasks []Task) error {
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
+// title must be a non-empty string.
 // priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
-// Returns an error if priority is invalid or dueDate is non-empty but cannot be parsed.
+// Returns an error if any input is invalid.
 func (m *Manager) Add(title, priority, dueDate string) error {
+	// Validate title at the public API boundary.
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("task title must not be empty")
+	}
+
 	// Validate priority at the public API boundary.
 	switch priority {
 	case "high", "medium", "low":
@@ -138,7 +147,7 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 
 	tasks = append(tasks, Task{
 		ID:       nextID,
-		Title:    title,
+		Title:    strings.TrimSpace(title),
 		Done:     false,
 		Priority: priority,
 		DueDate:  dueDate,
