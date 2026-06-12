@@ -99,6 +99,37 @@ func TestListFilterByPriority(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Priority validation tests
+// ---------------------------------------------------------------------------
+
+// TestAddInvalidPriority verifies that Add rejects unrecognised priority values.
+func TestAddInvalidPriority(t *testing.T) {
+	mgr := newManager(t)
+	tests := []string{"critical", "urgent", "", "HIGH", "Low"}
+	for _, p := range tests {
+		err := mgr.Add("Some task", p, "")
+		if err == nil {
+			t.Errorf("Add with priority %q: expected error, got nil", p)
+		}
+	}
+}
+
+// TestAddValidPriorities verifies that all three accepted priority values are
+// stored correctly.
+func TestAddValidPriorities(t *testing.T) {
+	for _, priority := range []string{"high", "medium", "low"} {
+		mgr := newManager(t)
+		if err := mgr.Add("Task", priority, ""); err != nil {
+			t.Errorf("Add with priority %q: unexpected error: %v", priority, err)
+		}
+		tasks, _ := mgr.List("", false)
+		if len(tasks) != 1 || tasks[0].Priority != priority {
+			t.Errorf("priority %q: stored task has priority %q", priority, tasks[0].Priority)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Stats tests (existing, preserved)
 // ---------------------------------------------------------------------------
 

@@ -104,9 +104,18 @@ func (m *Manager) save(tasks []Task) error {
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
+// priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
-// Returns an error if dueDate is non-empty but cannot be parsed.
+// Returns an error if priority is invalid or dueDate is non-empty but cannot be parsed.
 func (m *Manager) Add(title, priority, dueDate string) error {
+	// Validate priority at the public API boundary.
+	switch priority {
+	case "high", "medium", "low":
+		// valid
+	default:
+		return fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
+	}
+
 	// Validate due date format when provided.
 	if dueDate != "" {
 		if _, err := time.Parse(dateLayout, dueDate); err != nil {
