@@ -24,7 +24,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr := task.NewManager("tasks.json")
+	mgr, err := task.NewManager("tasks.json")
+	if err != nil {
+		log.Printf("failed to initialise task manager: %v", err)
+		os.Exit(1)
+	}
 	cmd := os.Args[1]
 
 	switch cmd {

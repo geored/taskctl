@@ -10,7 +10,40 @@ import (
 // newManager is a test helper that creates a Manager backed by a temp file.
 func newManager(t *testing.T) *Manager {
 	t.Helper()
-	return NewManager(filepath.Join(t.TempDir(), "tasks.json"))
+	mgr, err := NewManager(filepath.Join(t.TempDir(), "tasks.json"))
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+	return mgr
+}
+
+// ---------------------------------------------------------------------------
+// NewManager path validation tests
+// ---------------------------------------------------------------------------
+
+// TestNewManagerTraversalRejected verifies that paths beginning with ".." are
+// rejected by NewManager.
+func TestNewManagerTraversalRejected(t *testing.T) {
+	paths := []string{
+		"../../etc/shadow",
+		"../sibling/tasks.json",
+		"..",
+	}
+	for _, p := range paths {
+		_, err := NewManager(p)
+		if err == nil {
+			t.Errorf("NewManager(%q): expected error for traversal path, got nil", p)
+		}
+	}
+}
+
+// TestNewManagerValidPath verifies that a plain relative path is accepted.
+func TestNewManagerValidPath(t *testing.T) {
+	dir := t.TempDir()
+	_, err := NewManager(filepath.Join(dir, "tasks.json"))
+	if err != nil {
+		t.Errorf("NewManager: unexpected error for valid path: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +202,7 @@ func TestStatsMixed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Due date tests (new for issue #9)
+// Due date tests
 // ---------------------------------------------------------------------------
 
 func TestAddWithDueDate(t *testing.T) {
@@ -335,7 +368,7 @@ func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Atomic save and file permission tests (requirements 7–9)
+// Atomic save and file permission tests
 // ---------------------------------------------------------------------------
 
 // TestSaveFilePermissions verifies that the tasks file is written with mode
