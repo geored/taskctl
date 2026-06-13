@@ -255,6 +255,99 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_NothingToClear verifies that runClear on a store with only
+// pending tasks (or an empty store) returns no error.
+func TestRunClear_NothingToClear(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Pending task 1"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending task 2"})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear with only pending tasks: unexpected error: %v", err)
+	}
+
+	// All tasks should still be present.
+	tasks, listErr := mgr.List("", false)
+	if listErr != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", listErr)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks after runClear (nothing to clear), got %d", len(tasks))
+	}
+}
+
+// TestRunClear_ClearsCompletedTasks verifies that runClear removes done tasks
+// and leaves pending tasks in place, returning no error.
+func TestRunClear_ClearsCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Keep me"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Clear me"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Keep me too"})
+
+	// Mark the second task as done.
+	allTasks, _ := mgr.List("", false)
+	_ = mgr.Complete(allTasks[1].ID)
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	// Only 2 pending tasks should remain.
+	remaining, listErr := mgr.List("", false)
+	if listErr != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", listErr)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("expected 2 tasks remaining after runClear, got %d", len(remaining))
+	}
+	for _, task := range remaining {
+		if task.Done {
+			t.Errorf("task %d (%q) is Done — should have been cleared", task.ID, task.Title)
+		}
+	}
+}
+
+// TestRunClear_MultipleCallsIdempotent verifies that calling runClear twice
+// has the same effect: the second call clears 0 tasks and returns no error.
+func TestRunClear_MultipleCallsIdempotent(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
+
+	// Mark all tasks as done.
+	allTasks, _ := mgr.List("", false)
+	for _, task := range allTasks {
+		_ = mgr.Complete(task.ID)
+	}
+
+	// First call: should clear 2, 0 remaining.
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear (first call): unexpected error: %v", err)
+	}
+
+	// Second call: nothing left to clear, should still succeed.
+	err = runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear (second call): unexpected error: %v", err)
+	}
+
+	// Store should remain empty.
+	tasks, listErr := mgr.List("", false)
+	if listErr != nil {
+		t.Fatalf("List after second runClear: unexpected error: %v", listErr)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks after two runClear calls, got %d", len(tasks))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
