@@ -8,10 +8,34 @@ import (
 	"time"
 )
 
-// newManager is a test helper that creates a Manager backed by a temp file.
+// chdirTemp changes the working directory to a fresh temporary directory for
+// the duration of the test and restores the original directory on cleanup.
+// It returns the absolute path of the temporary directory.
+func chdirTemp(t *testing.T) string {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("chdirTemp: Getwd: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdirTemp: Chdir(%q): %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("chdirTemp cleanup: Chdir(%q): %v", orig, err)
+		}
+	})
+	return dir
+}
+
+// newManager is a test helper that creates a Manager backed by a relative-path
+// temp file. It changes the working directory to a fresh temp dir so that the
+// relative path "tasks.json" resolves to an isolated location per test.
 func newManager(t *testing.T) *Manager {
 	t.Helper()
-	mgr, err := NewManager(filepath.Join(t.TempDir(), "tasks.json"))
+	chdirTemp(t)
+	mgr, err := NewManager("tasks.json")
 	if err != nil {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
@@ -21,6 +45,27 @@ func newManager(t *testing.T) *Manager {
 // ---------------------------------------------------------------------------
 // NewManager path validation tests
 // ---------------------------------------------------------------------------
+
+// TestNewManagerAbsolutePathRejected verifies that absolute paths are rejected
+// by NewManager with a clear error message.
+func TestNewManagerAbsolutePathRejected(t *testing.T) {
+	paths := []string{
+		"/tmp/evil.json",
+		"/etc/shadow",
+		"/",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			_, err := NewManager(p)
+			if err == nil {
+				t.Errorf("NewManager(%q): expected error for absolute path, got nil", p)
+			}
+			if err != nil && !strings.Contains(err.Error(), "must be a relative path") {
+				t.Errorf("NewManager(%q): error should mention 'must be a relative path', got: %v", p, err)
+			}
+		})
+	}
+}
 
 // TestNewManagerTraversalRejected verifies that paths beginning with ".." are
 // rejected by NewManager.
@@ -38,12 +83,23 @@ func TestNewManagerTraversalRejected(t *testing.T) {
 	}
 }
 
-// TestNewManagerValidPath verifies that a plain relative path is accepted.
+// TestNewManagerValidPath verifies that plain relative paths are accepted by
+// NewManager — both a simple filename and a subdirectory path.
 func TestNewManagerValidPath(t *testing.T) {
-	dir := t.TempDir()
-	_, err := NewManager(filepath.Join(dir, "tasks.json"))
-	if err != nil {
-		t.Errorf("NewManager: unexpected error for valid path: %v", err)
+	validPaths := []string{
+		"tasks.json",
+		"data/tasks.json",
+	}
+	for _, p := range validPaths {
+		t.Run(p, func(t *testing.T) {
+			mgr, err := NewManager(p)
+			if err != nil {
+				t.Errorf("NewManager(%q): unexpected error for valid relative path: %v", p, err)
+			}
+			if mgr == nil {
+				t.Errorf("NewManager(%q): expected non-nil *Manager, got nil", p)
+			}
+		})
 	}
 }
 
@@ -251,8 +307,8 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that an incomplete task with a future due
-// date is not reported as overdue.
+// TestIsOverdue_FutureDate verifies that a task with a future due date is not
+// overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -266,27 +322,27 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_DoneTask verifies that a completed task with a past due date
-// is not reported as overdue (done tasks are never overdue).
+// TestIsOverdue_DoneTask verifies that a completed task is never considered
+// overdue even if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
-		Title:   "Done old task",
+		Title:   "Done task",
 		Done:    true,
 		DueDate: "2000-01-01",
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task NOT to be overdue regardless of due date")
+		t.Error("expected completed task NOT to be overdue")
 	}
 }
 
 // TestIsOverdue_NoDueDate verifies that a task without a due date is never
-// reported as overdue.
+// considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
 		ID:    4,
-		Title: "No date task",
+		Title: "No due date",
 		Done:  false,
 	}
 	now := time.Now()
@@ -659,15 +715,16 @@ func TestClear_EmptyStore(t *testing.T) {
 // TestClear_CorruptedFile verifies that Clear returns a non-nil error when the
 // backing file is corrupt (invalid JSON) and does NOT modify the store.
 func TestClear_CorruptedFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := chdirTemp(t)
 	filePath := filepath.Join(dir, "tasks.json")
+	relPath := "tasks.json"
 
-	// Write corrupt JSON.
+	// Write corrupt JSON directly to the absolute path so we can control content.
 	if err := os.WriteFile(filePath, []byte("not-valid-json{{{"), 0600); err != nil {
 		t.Fatalf("WriteFile: unexpected error: %v", err)
 	}
 
-	mgr, err := NewManager(filePath)
+	mgr, err := NewManager(relPath)
 	if err != nil {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
