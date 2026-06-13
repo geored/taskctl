@@ -251,7 +251,8 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that an incomplete task with a future due
+// date is not reported as overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -261,43 +262,41 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with future due date to not be overdue")
+		t.Error("expected task with future due date NOT to be overdue")
 	}
 }
 
 // TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
+// overdue, even if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
-		Title:   "Done old task",
+		Title:   "Done task",
 		Done:    true,
 		DueDate: "2000-01-01",
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
+		t.Error("expected completed task NOT to be overdue")
 	}
 }
 
-// TestIsOverdue_NoDueDate verifies that a task without a due date is never
+// TestIsOverdue_NoDueDate verifies that a task with no due date is never
 // considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
+		ID:    4,
+		Title: "No due date",
+		Done:  false,
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to not be overdue")
+		t.Error("expected task with no due date NOT to be overdue")
 	}
 }
 
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
-
 	_ = mgr.Add("Overdue task", "high", "2000-01-01")
 	_ = mgr.Add("Future task", "low", "2099-12-31")
 	_ = mgr.Add("No due date", "medium", "")
@@ -515,7 +514,7 @@ func TestListValidPriorities(t *testing.T) {
 		filter string
 		want   int
 	}{
-		{"", 3},      // no filter — all tasks
+		{"", 3},     // no filter — all tasks
 		{"high", 1},
 		{"medium", 1},
 		{"low", 1},
@@ -530,5 +529,135 @@ func TestListValidPriorities(t *testing.T) {
 				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Clear() tests
+// ---------------------------------------------------------------------------
+
+// TestClear_HappyPath verifies that Clear removes done tasks and keeps pending
+// ones, returning the correct cleared and remaining counts.
+func TestClear_HappyPath(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task 1", "high", "")   // will be marked done
+	_ = mgr.Add("Task 2", "medium", "") // pending
+	_ = mgr.Add("Task 3", "low", "")    // will be marked done
+	_ = mgr.Add("Task 4", "high", "")   // pending
+
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[0].ID) // Task 1 done
+	_ = mgr.Complete(tasks[2].ID) // Task 3 done
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("cleared: expected 2, got %d", cleared)
+	}
+	if remaining != 2 {
+		t.Errorf("remaining: expected 2, got %d", remaining)
+	}
+
+	// Verify only pending tasks survive.
+	survivors, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(survivors) != 2 {
+		t.Fatalf("expected 2 surviving tasks, got %d", len(survivors))
+	}
+	for _, s := range survivors {
+		if s.Done {
+			t.Errorf("surviving task %d (%q) is unexpectedly marked done", s.ID, s.Title)
+		}
+	}
+}
+
+// TestClear_AllDone verifies that Clear removes every task when all are done
+// and returns remaining=0.
+func TestClear_AllDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "low", "")
+	_ = mgr.Add("Task B", "medium", "")
+
+	tasks, _ := mgr.List("", false)
+	for _, tk := range tasks {
+		_ = mgr.Complete(tk.ID)
+	}
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("cleared: expected 2, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0, got %d", remaining)
+	}
+
+	survivors, _ := mgr.List("", false)
+	if len(survivors) != 0 {
+		t.Errorf("expected 0 survivors, got %d", len(survivors))
+	}
+}
+
+// TestClear_NoneDone verifies that Clear keeps all tasks when none are done
+// and returns cleared=0.
+func TestClear_NoneDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task X", "high", "")
+	_ = mgr.Add("Task Y", "low", "")
+	_ = mgr.Add("Task Z", "medium", "")
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 3 {
+		t.Errorf("remaining: expected 3, got %d", remaining)
+	}
+}
+
+// TestClear_EmptyList verifies that Clear on an empty store returns
+// cleared=0, remaining=0, and no error.
+func TestClear_EmptyList(t *testing.T) {
+	mgr := newManager(t)
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear on empty store: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0, got %d", remaining)
+	}
+}
+
+// TestClear_ErrorPath verifies that Clear returns a non-nil error when the
+// tasks file is corrupted (contains invalid JSON).
+func TestClear_ErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write corrupted JSON so that load() fails.
+	if err := os.WriteFile(filePath, []byte("{invalid json}"), 0600); err != nil {
+		t.Fatalf("WriteFile: unexpected error: %v", err)
+	}
+
+	mgr, err := NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+
+	_, _, err = mgr.Clear()
+	if err == nil {
+		t.Fatal("Clear with corrupted file: expected error, got nil")
 	}
 }

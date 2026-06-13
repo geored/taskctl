@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -251,6 +253,98 @@ func TestRunStats_WithTasks(t *testing.T) {
 	err := runStats(mgr)
 	if err != nil {
 		t.Fatalf("runStats with tasks: unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_HappyPath verifies that runClear succeeds and prints the correct
+// message when there are done tasks to remove.
+func TestRunClear_HappyPath(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Done task"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending task"})
+
+	tasks, _ := mgr.List("", false)
+	// Mark the first task as done.
+	_ = mgr.Complete(tasks[0].ID)
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	// Verify only the pending task remains.
+	survivors, _ := mgr.List("", false)
+	if len(survivors) != 1 {
+		t.Errorf("expected 1 surviving task, got %d", len(survivors))
+	}
+	if survivors[0].Done {
+		t.Error("surviving task should not be marked done")
+	}
+}
+
+// TestRunClear_EmptyStore verifies that runClear succeeds with zero counts on
+// an empty task store.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear on empty store: unexpected error: %v", err)
+	}
+}
+
+// TestRunClear_NoneDone verifies that runClear succeeds and leaves all tasks
+// intact when none are marked done.
+func TestRunClear_NoneDone(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Active 1"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Active 2"})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear with none done: unexpected error: %v", err)
+	}
+
+	tasks, _ := mgr.List("", false)
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks remaining, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_ErrorPath verifies that runClear returns a wrapped error
+// starting with "clear: " when the underlying manager returns an error.
+func TestRunClear_ErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write corrupted JSON so that Clear() → load() fails.
+	if err := os.WriteFile(filePath, []byte("{bad json}"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	mgr, err := task.NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+
+	runErr := runClear(mgr)
+	if runErr == nil {
+		t.Fatal("runClear with corrupted file: expected error, got nil")
+	}
+	if !strings.HasPrefix(runErr.Error(), "clear: ") {
+		t.Errorf("error should be wrapped with 'clear: ' prefix, got: %v", runErr)
+	}
+	// The wrapped error must not be double-wrapped.
+	var innerErr error
+	if errors.As(runErr, &innerErr) {
+		// Unwrap one level — should not contain another "clear: " prefix.
+		unwrapped := errors.Unwrap(runErr)
+		if unwrapped != nil && strings.HasPrefix(unwrapped.Error(), "clear: ") {
+			t.Errorf("error is double-wrapped with 'clear: ' prefix: %v", runErr)
+		}
 	}
 }
 
