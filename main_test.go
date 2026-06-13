@@ -255,6 +255,80 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_EmptyStore verifies that runClear on an empty store succeeds
+// without error.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear on empty store: unexpected error: %v", err)
+	}
+}
+
+// TestRunClear_NoCompletedTasks verifies that when all tasks are pending,
+// runClear succeeds and reports cleared=0 with the correct remaining count.
+func TestRunClear_NoCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Pending 1"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending 2"})
+
+	// runClear must succeed — no error expected.
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear with no completed tasks: unexpected error: %v", err)
+	}
+
+	// All tasks must still be present.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks remaining after clear with no completed tasks, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_ClearsCompleted adds tasks, marks some done, then calls
+// runClear and verifies that it succeeds and only pending tasks remain.
+func TestRunClear_ClearsCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Keep this"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Remove this"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Keep this too"})
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	// Mark the second task (index 1) as done.
+	if err := runDone(mgr, []string{intStr(tasks[1].ID)}); err != nil {
+		t.Fatalf("runDone: unexpected error: %v", err)
+	}
+
+	if err := runClear(mgr); err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	// Exactly the 2 pending tasks should remain.
+	after, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected 2 tasks after runClear, got %d", len(after))
+	}
+	for _, task := range after {
+		if task.Done {
+			t.Errorf("task %d (%q) should not be done after runClear", task.ID, task.Title)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
