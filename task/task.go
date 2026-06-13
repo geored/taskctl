@@ -19,7 +19,8 @@ const dateLayout = "2006-01-02"
 // maxTitleLength is the maximum number of Unicode characters (runes) allowed
 // in a task title. Titles longer than this are rejected at the Add boundary
 // to prevent unbounded storage growth and UI display issues.
-const maxTitleLength = 256
+// Fixes #48: raised from 256 to 1000 per security requirement.
+const maxTitleLength = 1000
 
 // Task represents a single to-do item.
 type Task struct {
@@ -94,6 +95,7 @@ func NewManager(filePath string) (*Manager, error) {
 
 // load reads all tasks from disk. It returns an empty slice when the file does
 // not yet exist. Callers must hold m.mu before calling load.
+// Fixes #30: JSON parse errors now include the file path.
 func (m *Manager) load() ([]Task, error) {
 	data, err := os.ReadFile(m.filePath)
 	if err != nil {
@@ -104,7 +106,7 @@ func (m *Manager) load() ([]Task, error) {
 	}
 	var tasks []Task
 	if err := json.Unmarshal(data, &tasks); err != nil {
-		return nil, fmt.Errorf("load: unmarshal: %w", err)
+		return nil, fmt.Errorf("failed to parse task file %s: %w", m.filePath, err)
 	}
 	return tasks, nil
 }
@@ -159,6 +161,7 @@ func (m *Manager) save(tasks []Task) error {
 // priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
 // Returns an error if any input is invalid.
+// Fixes #48: enforces maximum title length of 1000 characters.
 func (m *Manager) Add(title, priority, dueDate string) error {
 	// Validate title at the public API boundary.
 	trimmed := strings.TrimSpace(title)
@@ -168,8 +171,7 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 	// Count Unicode code points (runes), not bytes, so that multibyte
 	// characters such as emoji are counted correctly (Fixes #69).
 	if utf8.RuneCountInString(trimmed) > maxTitleLength {
-		return fmt.Errorf("task title must not exceed %d characters (got %d)",
-			maxTitleLength, utf8.RuneCountInString(trimmed))
+		return fmt.Errorf("task title exceeds maximum length of %d characters", maxTitleLength)
 	}
 
 	// Validate priority at the public API boundary.
@@ -234,25 +236,23 @@ func isValidPriority(p string) bool {
 // When overdueOnly is true only incomplete tasks whose due date has passed are returned.
 // Returns an error if priority is not a valid value.
 //
-// The mutex is released after loading tasks from disk; filtering (including
-// IsOverdue comparisons) is performed without holding the lock to minimise
-// lock contention (Fixes #67).
+// Fixes #73: the mutex is held for the full duration including the filtering
+// step to prevent TOCTOU races.
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	// Validate priority at the library boundary — consistent with Add().
 	if !isValidPriority(priority) {
 		return nil, fmt.Errorf("invalid priority filter %q: must be low, medium, or high", priority)
 	}
 
-	// Load tasks under the lock, then release before filtering.
 	m.mu.Lock()
-	tasks, err := m.load()
-	m.mu.Unlock()
+	defer m.mu.Unlock()
 
+	tasks, err := m.load()
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter without holding the lock to reduce contention.
+	// Filter while holding the lock to prevent TOCTOU races (Fixes #73).
 	now := time.Now()
 	result := make([]Task, 0, len(tasks))
 	for _, t := range tasks {
@@ -268,8 +268,13 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 }
 
 // Complete marks the task with the given ID as done and persists the change.
-// Returns an error if no task with that ID exists.
+// Returns an error if id is <= 0 or if no task with that ID exists.
+// Fixes #50: validates that id is a positive integer.
 func (m *Manager) Complete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid task ID: %d", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -288,8 +293,13 @@ func (m *Manager) Complete(id int) error {
 }
 
 // Delete removes the task with the given ID from the store.
-// Returns an error if no task with that ID exists.
+// Returns an error if id is <= 0 or if no task with that ID exists.
+// Fixes #50: validates that id is a positive integer.
 func (m *Manager) Delete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid task ID: %d", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
