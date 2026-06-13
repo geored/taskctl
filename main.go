@@ -13,6 +13,14 @@ import (
 	"github.com/geored/taskctl/task"
 )
 
+// version is set at build time via -ldflags "-X main.version=<tag>".
+// Fixes #74: support taskctl --version and taskctl version.
+var version = "dev"
+
+// maxFilePathLen is the maximum allowed length for the --file flag value.
+// Fixes #76: reject excessively long file paths.
+const maxFilePathLen = 4096
+
 func init() {
 	// Remove the default timestamp prefix from log messages so that the CLI
 	// output is clean; the caller sees only the message itself.
@@ -41,6 +49,12 @@ func run(args []string, w io.Writer) error {
 		return nil
 	}
 
+	// Support --version / version subcommand. Fixes #74.
+	if args[1] == "--version" || args[1] == "-version" || args[1] == "version" {
+		fmt.Fprintf(w, "taskctl version %s\n", version)
+		return nil
+	}
+
 	// Parse the top-level --file flag, which may appear before or after the
 	// subcommand. We do a quick pre-scan for --file / --file=<val> so that
 	// `taskctl --file x.json add ...` works as well as `taskctl add --file x.json ...`.
@@ -63,6 +77,14 @@ func run(args []string, w io.Writer) error {
 			remaining = append(remaining[:i], remaining[i+1:]...)
 			i--
 		}
+	}
+
+	// Validate --file path length and reject directory traversal. Fixes #76.
+	if len(filePath) > maxFilePathLen {
+		return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
+	}
+	if strings.Contains(filePath, "..") {
+		return fmt.Errorf("--file path must not contain '..' (directory traversal rejected): %q", filePath)
 	}
 
 	if len(remaining) == 0 {
@@ -103,6 +125,7 @@ func printUsage() {
 
 Global flags:
   --file <path>   Path to the tasks JSON file (default: tasks.json)
+  --version       Print the version string and exit
   --help, -h      Show this help message
 
 Commands:
@@ -111,7 +134,8 @@ Commands:
   done    <id>
   delete  <id>
   stats
-  clear   Remove all completed (done) tasks`)
+  clear   Remove all completed (done) tasks
+  version Print the version string`)
 }
 
 // runAdd handles the "add" sub-command.
