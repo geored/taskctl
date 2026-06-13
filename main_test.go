@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +20,28 @@ func newTestManager(t *testing.T) *task.Manager {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
 	return mgr
+}
+
+// captureStdout redirects os.Stdout during fn(), returns what was printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy: %v", err)
+	}
+	return buf.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +281,95 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// helper
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_HappyPath verifies that runClear prints the exact expected
+// output for a known mixture of done and pending tasks.
+func TestRunClear_HappyPath(t *testing.T) {
+	mgr := newTestManager(t)
+	// Add 4 tasks, mark 2 done.
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task 2"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task 3"})
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 4"})
+
+	all, _ := mgr.List("", false)
+	_ = mgr.Complete(all[0].ID)
+	_ = mgr.Complete(all[2].ID)
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 2 completed tasks. 2 tasks remaining.\n"
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
+	}
+}
+
+// TestRunClear_NothingToClear verifies the output when no tasks are done.
+func TestRunClear_NothingToClear(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "medium", "Pending task"})
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 0 completed tasks. 1 tasks remaining.\n"
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
+	}
+}
+
+// TestRunClear_EmptyStore verifies the output when the store is empty.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear on empty store: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 0 completed tasks. 0 tasks remaining.\n"
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
+	}
+}
+
+// TestRunClear_Error verifies that runClear returns a non-nil error (wrapped
+// with "clear:") when Manager.Clear() fails due to a corrupted storage file.
+func TestRunClear_Error(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write invalid JSON so that load() will fail.
+	if err := os.WriteFile(filePath, []byte("{bad json"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	mgr, err := task.NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+
+	runErr := runClear(mgr)
+	if runErr == nil {
+		t.Fatal("runClear with bad file: expected error, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "clear:") {
+		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// helpers
 // ---------------------------------------------------------------------------
 
 // intStr converts an int to its string representation — avoids importing strconv
@@ -282,3 +396,6 @@ func itoa(n int) string {
 	}
 	return string(digits)
 }
+
+// Ensure fmt is used (captureStdout uses it indirectly via format strings).
+var _ = fmt.Sprintf

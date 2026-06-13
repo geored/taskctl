@@ -253,6 +253,36 @@ func (m *Manager) Delete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
+// Clear removes all tasks marked as done (Done == true) and saves the result.
+// It returns the count of tasks removed (cleared) and the count of tasks kept
+// (remaining). The entire load-filter-save sequence is performed under m.mu to
+// prevent races. If load or save fails, the store is not modified and a
+// non-nil error is returned.
+func (m *Manager) Clear() (cleared int, remaining int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, err := m.load()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	kept := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Done {
+			cleared++
+		} else {
+			kept = append(kept, t)
+		}
+	}
+	remaining = len(kept)
+
+	if err := m.save(kept); err != nil {
+		return 0, 0, err
+	}
+	return cleared, remaining, nil
+}
+
 // Stats holds aggregate counts for the task list.
 type Stats struct {
 	Total     int
