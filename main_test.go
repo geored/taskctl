@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +20,41 @@ func newTestManager(t *testing.T) *task.Manager {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
 	return mgr
+}
+
+// captureStdout redirects os.Stdout during the execution of fn and returns
+// everything that was printed to it.  It restores the original os.Stdout even
+// if fn panics.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("captureStdout: os.Pipe: %v", err)
+	}
+
+	orig := os.Stdout
+	os.Stdout = w
+
+	// Ensure we always restore, even on panic.
+	defer func() {
+		os.Stdout = orig
+	}()
+
+	fn()
+
+	// Close the write-end so the Read below gets EOF.
+	if err := w.Close(); err != nil {
+		t.Fatalf("captureStdout: w.Close: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("captureStdout: io.Copy: %v", err)
+	}
+	_ = r.Close()
+
+	return buf.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +290,100 @@ func TestRunStats_WithTasks(t *testing.T) {
 	err := runStats(mgr)
 	if err != nil {
 		t.Fatalf("runStats with tasks: unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_WithCompletedTasks verifies that runClear removes done tasks,
+// reports the correct counts in its output, and leaves pending tasks intact.
+func TestRunClear_WithCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+
+	// Add three tasks.
+	if err := runAdd(mgr, []string{"--priority", "high", "Task A"}); err != nil {
+		t.Fatalf("runAdd Task A: %v", err)
+	}
+	if err := runAdd(mgr, []string{"--priority", "medium", "Task B"}); err != nil {
+		t.Fatalf("runAdd Task B: %v", err)
+	}
+	if err := runAdd(mgr, []string{"--priority", "low", "Task C"}); err != nil {
+		t.Fatalf("runAdd Task C: %v", err)
+	}
+
+	// Mark the first two as done.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if err := mgr.Complete(tasks[0].ID); err != nil {
+		t.Fatalf("Complete task 0: %v", err)
+	}
+	if err := mgr.Complete(tasks[1].ID); err != nil {
+		t.Fatalf("Complete task 1: %v", err)
+	}
+
+	// Run clear and capture stdout.
+	output := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	// Verify the output message contains the expected counts.
+	want := fmt.Sprintf("Cleared %d completed tasks. %d tasks remaining.", 2, 1)
+	if !strings.Contains(output, want) {
+		t.Errorf("runClear output = %q; want it to contain %q", strings.TrimSpace(output), want)
+	}
+
+	// Verify that only the pending task remains on disk.
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after clear: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Errorf("expected 1 remaining task after clear, got %d", len(remaining))
+	}
+	if remaining[0].Title != "Task C" {
+		t.Errorf("expected remaining task title %q, got %q", "Task C", remaining[0].Title)
+	}
+}
+
+// TestRunClear_NoCompletedTasks verifies that runClear prints the friendly
+// "nothing to clear" message when all tasks are still pending.
+func TestRunClear_NoCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+
+	// Add two pending tasks (neither is completed).
+	if err := runAdd(mgr, []string{"--priority", "high", "Pending A"}); err != nil {
+		t.Fatalf("runAdd Pending A: %v", err)
+	}
+	if err := runAdd(mgr, []string{"--priority", "low", "Pending B"}); err != nil {
+		t.Fatalf("runAdd Pending B: %v", err)
+	}
+
+	// Run clear and capture stdout.
+	output := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	// Verify the friendly "nothing to clear" message is printed.
+	want := "No completed tasks to clear."
+	if !strings.Contains(output, want) {
+		t.Errorf("runClear output = %q; want it to contain %q", strings.TrimSpace(output), want)
+	}
+
+	// Verify that both pending tasks are still present.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after clear: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks to remain untouched, got %d", len(tasks))
 	}
 }
 

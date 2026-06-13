@@ -217,7 +217,7 @@ func runClear(mgr *task.Manager) error {
 		return fmt.Errorf("clear: %w", err)
 	}
 	if cleared == 0 {
-		fmt.Println("No completed tasks to clear.")
+		fmt.Printf("No completed tasks to clear.\n")
 		return nil
 	}
 	fmt.Printf("Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
