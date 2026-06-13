@@ -251,7 +251,8 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that an incomplete task with a future due
+// date is not reported as overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -266,7 +267,7 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 }
 
 // TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
+// overdue even if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
@@ -276,22 +277,21 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
+		t.Error("expected completed task to never be overdue")
 	}
 }
 
-// TestIsOverdue_NoDueDate verifies that a task without a due date is never
+// TestIsOverdue_NoDueDate verifies that a task with no due date is never
 // considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
+		ID:    4,
+		Title: "No due date task",
+		Done:  false,
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to not be overdue")
+		t.Error("expected task with no due date to never be overdue")
 	}
 }
 
@@ -530,5 +530,191 @@ func TestListValidPriorities(t *testing.T) {
 				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Clear tests
+// ---------------------------------------------------------------------------
+
+// TestClearEmptyStore verifies that Clear on an empty store returns (0, 0, nil)
+// and the store remains empty.
+func TestClearEmptyStore(t *testing.T) {
+	mgr := newManager(t)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear on empty store: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0, got %d", remaining)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("store should be empty after Clear on empty store, got %d tasks", len(tasks))
+	}
+}
+
+// TestClearNoCompletedTasks verifies that Clear with no completed tasks returns
+// (0, total, nil) and all tasks remain.
+func TestClearNoCompletedTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Pending A", "high", "")
+	_ = mgr.Add("Pending B", "medium", "")
+	_ = mgr.Add("Pending C", "low", "")
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 3 {
+		t.Errorf("remaining: expected 3, got %d", remaining)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks after Clear with no done tasks, got %d", len(tasks))
+	}
+}
+
+// TestClearSomeCompletedTasks verifies that Clear removes only done tasks and
+// returns correct cleared/remaining counts.
+func TestClearSomeCompletedTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	// Mark first two tasks as done.
+	_ = mgr.Complete(tasks[0].ID)
+	_ = mgr.Complete(tasks[1].ID)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("cleared: expected 2, got %d", cleared)
+	}
+	if remaining != 1 {
+		t.Errorf("remaining: expected 1, got %d", remaining)
+	}
+
+	// Verify only the pending task remains.
+	after, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("expected 1 task after Clear, got %d", len(after))
+	}
+	if after[0].Title != "Task C" {
+		t.Errorf("expected remaining task title %q, got %q", "Task C", after[0].Title)
+	}
+	if after[0].Done {
+		t.Error("remaining task should not be marked done")
+	}
+}
+
+// TestClearAllTasksCompleted verifies that Clear removes all tasks when every
+// task is marked done, leaving the store empty.
+func TestClearAllTasksCompleted(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "low", "")
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	for _, task := range tasks {
+		if err := mgr.Complete(task.ID); err != nil {
+			t.Fatalf("Complete(%d): unexpected error: %v", task.ID, err)
+		}
+	}
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("cleared: expected 2, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0, got %d", remaining)
+	}
+
+	after, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(after) != 0 {
+		t.Errorf("expected empty store after clearing all tasks, got %d tasks", len(after))
+	}
+}
+
+// TestClearPersistence verifies that the cleared state is persisted correctly:
+// a subsequent List call returns only the non-done tasks.
+func TestClearPersistence(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Keep me", "medium", "")
+	_ = mgr.Add("Remove me", "high", "")
+	_ = mgr.Add("Also keep", "low", "")
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	// Complete only "Remove me" (tasks[1]).
+	if err := mgr.Complete(tasks[1].ID); err != nil {
+		t.Fatalf("Complete: unexpected error: %v", err)
+	}
+
+	_, _, err = mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+
+	// Re-list to verify persistence.
+	after, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected 2 tasks after Clear, got %d", len(after))
+	}
+
+	titles := make(map[string]bool, len(after))
+	for _, task := range after {
+		titles[task.Title] = true
+		if task.Done {
+			t.Errorf("task %q should not be marked done after Clear", task.Title)
+		}
+	}
+	if !titles["Keep me"] {
+		t.Error("expected 'Keep me' to remain after Clear")
+	}
+	if !titles["Also keep"] {
+		t.Error("expected 'Also keep' to remain after Clear")
+	}
+	if titles["Remove me"] {
+		t.Error("'Remove me' should have been cleared")
 	}
 }

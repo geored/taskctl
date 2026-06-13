@@ -41,6 +41,8 @@ func main() {
 		runErr = runDone(mgr, os.Args[2:])
 	case "delete":
 		runErr = runDelete(mgr, os.Args[2:])
+	case "clear":
+		runErr = runClear(mgr)
 	case "stats":
 		runErr = runStats(mgr)
 	default:
@@ -64,6 +66,7 @@ Commands:
   list    [--priority <low|medium|high>] [--overdue]
   done    <id>
   delete  <id>
+  clear
   stats`)
 }
 
@@ -202,6 +205,19 @@ func runDelete(mgr *task.Manager, args []string) error {
 		return fmt.Errorf("delete: %w", err)
 	}
 	fmt.Printf("Task %d deleted.\n", id)
+	return nil
+}
+
+// runClear handles the "clear" sub-command.
+// It removes all tasks marked as done and prints a summary of cleared and
+// remaining counts. Returns an error instead of calling os.Exit, enabling
+// unit testing.
+func runClear(mgr *task.Manager) error {
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		return fmt.Errorf("clear: %w", err)
+	}
+	fmt.Printf("Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
 	return nil
 }
 
