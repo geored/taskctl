@@ -10,14 +10,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // dateLayout is the canonical date format accepted and displayed by taskctl.
 const dateLayout = "2006-01-02"
 
-// maxTitleLength is the maximum number of characters allowed in a task title.
-// Titles longer than this are rejected at the Add boundary to prevent
-// unbounded storage growth and UI display issues.
+// maxTitleLength is the maximum number of Unicode characters (runes) allowed
+// in a task title. Titles longer than this are rejected at the Add boundary
+// to prevent unbounded storage growth and UI display issues.
 const maxTitleLength = 256
 
 // Task represents a single to-do item.
@@ -65,7 +66,7 @@ func (t Task) IsOverdue(now time.Time) bool {
 // TODO(#17): add OS-level file locking for multi-process safety.
 type Manager struct {
 	filePath string
-	mu       sync.Mutex // TODO(#17): add OS-level file locking for multi-process safety
+	mu       sync.Mutex
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
@@ -110,6 +111,8 @@ func (m *Manager) load() ([]Task, error) {
 
 // save writes the task slice to disk as JSON using an atomic write-to-temp +
 // rename pattern. The file is created with mode 0600 (owner read/write only).
+// An fsync is performed on the temp file before the rename to ensure data is
+// durable on disk even in the event of a crash.
 // Callers must hold m.mu before calling save.
 func (m *Manager) save(tasks []Task) error {
 	data, err := json.MarshalIndent(tasks, "", "  ")
@@ -137,6 +140,11 @@ func (m *Manager) save(tasks []Task) error {
 		tmp.Close()
 		return fmt.Errorf("save: write: %w", err)
 	}
+	// Sync flushes kernel buffers to disk, ensuring durability before rename.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("save: sync: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("save: close: %w", err)
 	}
@@ -147,7 +155,7 @@ func (m *Manager) save(tasks []Task) error {
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
-// title must be a non-empty string of at most maxTitleLength characters.
+// title must be a non-empty string of at most maxTitleLength Unicode characters.
 // priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
 // Returns an error if any input is invalid.
@@ -157,8 +165,11 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 	if trimmed == "" {
 		return fmt.Errorf("task title must not be empty")
 	}
-	if len(trimmed) > maxTitleLength {
-		return fmt.Errorf("task title must not exceed %d characters (got %d)", maxTitleLength, len(trimmed))
+	// Count Unicode code points (runes), not bytes, so that multibyte
+	// characters such as emoji are counted correctly (Fixes #69).
+	if utf8.RuneCountInString(trimmed) > maxTitleLength {
+		return fmt.Errorf("task title must not exceed %d characters (got %d)",
+			maxTitleLength, utf8.RuneCountInString(trimmed))
 	}
 
 	// Validate priority at the public API boundary.
@@ -185,11 +196,16 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 	}
 
 	// Determine next ID (max existing ID + 1, or 1 for an empty list).
+	// Guard against integer overflow: if any existing ID equals math.MaxInt,
+	// incrementing would produce a negative value (Fixes #70).
 	nextID := 1
 	for _, t := range tasks {
 		if t.ID >= nextID {
 			nextID = t.ID + 1
 		}
+	}
+	if nextID <= 0 {
+		return fmt.Errorf("id overflow: task store is full")
 	}
 
 	tasks = append(tasks, Task{
@@ -217,20 +233,26 @@ func isValidPriority(p string) bool {
 // priority must be one of "low", "medium", "high", or "" (empty = no filter).
 // When overdueOnly is true only incomplete tasks whose due date has passed are returned.
 // Returns an error if priority is not a valid value.
+//
+// The mutex is released after loading tasks from disk; filtering (including
+// IsOverdue comparisons) is performed without holding the lock to minimise
+// lock contention (Fixes #67).
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	// Validate priority at the library boundary — consistent with Add().
 	if !isValidPriority(priority) {
 		return nil, fmt.Errorf("invalid priority filter %q: must be low, medium, or high", priority)
 	}
 
+	// Load tasks under the lock, then release before filtering.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	tasks, err := m.load()
+	m.mu.Unlock()
+
 	if err != nil {
 		return nil, err
 	}
 
+	// Filter without holding the lock to reduce contention.
 	now := time.Now()
 	result := make([]Task, 0, len(tasks))
 	for _, t := range tasks {
@@ -245,13 +267,9 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	return result, nil
 }
 
-// Complete marks the task with the given ID as done.
-// id must be a positive integer; returns an error for id <= 0.
+// Complete marks the task with the given ID as done and persists the change.
+// Returns an error if no task with that ID exists.
 func (m *Manager) Complete(id int) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid id %d: must be a positive integer", id)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -259,6 +277,7 @@ func (m *Manager) Complete(id int) error {
 	if err != nil {
 		return err
 	}
+
 	for i, t := range tasks {
 		if t.ID == id {
 			tasks[i].Done = true
@@ -268,13 +287,9 @@ func (m *Manager) Complete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
-// Delete removes the task with the given ID.
-// id must be a positive integer; returns an error for id <= 0.
+// Delete removes the task with the given ID from the store.
+// Returns an error if no task with that ID exists.
 func (m *Manager) Delete(id int) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid id %d: must be a positive integer", id)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -282,20 +297,28 @@ func (m *Manager) Delete(id int) error {
 	if err != nil {
 		return err
 	}
-	for i, t := range tasks {
+
+	filtered := make([]Task, 0, len(tasks))
+	found := false
+	for _, t := range tasks {
 		if t.ID == id {
-			tasks = append(tasks[:i], tasks[i+1:]...)
-			return m.save(tasks)
+			found = true
+			continue
 		}
+		filtered = append(filtered, t)
 	}
-	return fmt.Errorf("task %d not found", id)
+	if !found {
+		return fmt.Errorf("task %d not found", id)
+	}
+	return m.save(filtered)
 }
 
-// Clear removes all tasks marked as done (Done == true) and saves the result.
-// It returns the count of tasks removed (cleared) and the count of tasks kept
-// (remaining). The entire load-filter-save sequence is performed under m.mu to
-// prevent races. If load or save fails, the store is not modified and a
+// Clear removes all completed tasks from the store and returns the count of
+// tasks cleared and the count of tasks remaining. The mutex is held throughout
+// to prevent races. If load or save fails, the store is not modified and a
 // non-nil error is returned.
+//
+// When no tasks are completed, the backing file is not written (Fixes #66).
 func (m *Manager) Clear() (cleared int, remaining int, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -314,6 +337,11 @@ func (m *Manager) Clear() (cleared int, remaining int, err error) {
 		}
 	}
 	remaining = len(kept)
+
+	// Early return: skip the disk write when nothing was cleared (Fixes #66).
+	if cleared == 0 {
+		return 0, remaining, nil
+	}
 
 	if err := m.save(kept); err != nil {
 		return 0, 0, err

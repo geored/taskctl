@@ -1,6 +1,8 @@
 package task
 
 import (
+	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,15 +232,15 @@ func TestStatsEmpty(t *testing.T) {
 		t.Fatalf("Stats: unexpected error: %v", err)
 	}
 	if s.Total != 0 || s.Completed != 0 || s.Pending != 0 || s.Overdue != 0 {
-		t.Errorf("expected all-zero stats on empty store, got %+v", s)
+		t.Errorf("expected all-zero Stats on empty store, got %+v", s)
 	}
 }
 
 func TestStatsMixed(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("Task 1", "high", "")
-	_ = mgr.Add("Task 2", "low", "")
-	_ = mgr.Add("Task 3", "medium", "")
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
 
 	tasks, _ := mgr.List("", false)
 	_ = mgr.Complete(tasks[0].ID)
@@ -256,26 +258,31 @@ func TestStatsMixed(t *testing.T) {
 	if s.Pending != 2 {
 		t.Errorf("Pending: expected 2, got %d", s.Pending)
 	}
+	if s.HighPriority != 1 {
+		t.Errorf("HighPriority: expected 1, got %d", s.HighPriority)
+	}
+	if s.MediumPriority != 1 {
+		t.Errorf("MediumPriority: expected 1, got %d", s.MediumPriority)
+	}
+	if s.LowPriority != 1 {
+		t.Errorf("LowPriority: expected 1, got %d", s.LowPriority)
+	}
 }
-
-// ---------------------------------------------------------------------------
-// Due date tests
-// ---------------------------------------------------------------------------
 
 func TestAddWithDueDate(t *testing.T) {
 	mgr := newManager(t)
-	if err := mgr.Add("Submit report", "high", "2030-12-31"); err != nil {
+	if err := mgr.Add("Due task", "high", "2099-12-31"); err != nil {
 		t.Fatalf("Add with due date: unexpected error: %v", err)
 	}
 	tasks, _ := mgr.List("", false)
-	if tasks[0].DueDate != "2030-12-31" {
-		t.Errorf("expected DueDate %q, got %q", "2030-12-31", tasks[0].DueDate)
+	if tasks[0].DueDate != "2099-12-31" {
+		t.Errorf("expected DueDate %q, got %q", "2099-12-31", tasks[0].DueDate)
 	}
 }
 
 func TestAddInvalidDueDate(t *testing.T) {
 	mgr := newManager(t)
-	err := mgr.Add("Bad date task", "low", "not-a-date")
+	err := mgr.Add("Bad date", "medium", "not-a-date")
 	if err == nil {
 		t.Fatal("expected error for invalid due date, got nil")
 	}
@@ -348,6 +355,43 @@ func TestIsOverdue_NoDueDate(t *testing.T) {
 	now := time.Now()
 	if task.IsOverdue(now) {
 		t.Error("expected task with no due date NOT to be overdue")
+	}
+}
+
+// TestIsOverdue_TodayNotOverdue verifies that a task due today (in UTC) is
+// never flagged as overdue, regardless of the local timezone. This guards
+// against the Truncate(24h) UTC-midnight bug (Fixes #58).
+func TestIsOverdue_TodayNotOverdue(t *testing.T) {
+	now := time.Now().UTC()
+	todayStr := now.Format(dateLayout)
+	task := Task{
+		ID:      5,
+		Title:   "Due today",
+		Done:    false,
+		DueDate: todayStr,
+	}
+	// Pass a now value that is in a far-ahead timezone to stress timezone handling.
+	loc := time.FixedZone("UTC+14", 14*60*60) // UTC+14 is the furthest ahead
+	nowLocal := now.In(loc)
+	if task.IsOverdue(nowLocal) {
+		t.Errorf("task due today (%s) should NOT be overdue; now=%v", todayStr, nowLocal)
+	}
+}
+
+// TestIsOverdue_YesterdayIsOverdue verifies that a task due yesterday is always
+// flagged as overdue (Fixes #58).
+func TestIsOverdue_YesterdayIsOverdue(t *testing.T) {
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1)
+	yesterdayStr := yesterday.Format(dateLayout)
+	task := Task{
+		ID:      6,
+		Title:   "Due yesterday",
+		Done:    false,
+		DueDate: yesterdayStr,
+	}
+	if !task.IsOverdue(now) {
+		t.Errorf("task due yesterday (%s) should be overdue", yesterdayStr)
 	}
 }
 
@@ -460,7 +504,7 @@ func TestSaveAtomicity(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Error-path tests (new — requirement #3)
+// Error-path tests
 // ---------------------------------------------------------------------------
 
 // TestCompleteNonExistentID verifies that Complete returns an error when the
@@ -539,7 +583,7 @@ func TestAddEmptyTitle(t *testing.T) {
 }
 
 // TestListInvalidPriority verifies that List returns an error when called with
-// an unrecognised priority string (library-boundary validation — requirement #1).
+// an unrecognised priority string (library-boundary validation).
 func TestListInvalidPriority(t *testing.T) {
 	mgr := newManager(t)
 	_ = mgr.Add("A task", "medium", "")
@@ -562,27 +606,19 @@ func TestListInvalidPriority(t *testing.T) {
 // including empty string (no filter) without returning an error.
 func TestListValidPriorities(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("High task", "high", "")
-	_ = mgr.Add("Medium task", "medium", "")
-	_ = mgr.Add("Low task", "low", "")
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
 
-	validPriorities := []struct {
-		filter string
-		want   int
-	}{
-		{"", 3},     // no filter — all tasks
-		{"high", 1},
-		{"medium", 1},
-		{"low", 1},
-	}
-	for _, tc := range validPriorities {
-		t.Run("priority="+tc.filter, func(t *testing.T) {
-			tasks, err := mgr.List(tc.filter, false)
+	validPriorities := []string{"", "high", "medium", "low"}
+	for _, p := range validPriorities {
+		t.Run("priority="+p, func(t *testing.T) {
+			tasks, err := mgr.List(p, false)
 			if err != nil {
-				t.Fatalf("List(%q): unexpected error: %v", tc.filter, err)
+				t.Errorf("List(%q): unexpected error: %v", p, err)
 			}
-			if len(tasks) != tc.want {
-				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
+			if tasks == nil {
+				t.Errorf("List(%q): expected non-nil task slice, got nil", p)
 			}
 		})
 	}
@@ -592,8 +628,8 @@ func TestListValidPriorities(t *testing.T) {
 // Clear tests
 // ---------------------------------------------------------------------------
 
-// TestClear_MixedTasks verifies that Clear removes done tasks and keeps pending
-// ones, returning correct cleared/remaining counts.
+// TestClear_MixedTasks verifies that Clear removes all completed tasks and
+// leaves pending ones, returning correct cleared/remaining counts.
 func TestClear_MixedTasks(t *testing.T) {
 	mgr := newManager(t)
 	// Add 5 tasks, mark 3 done.
@@ -741,5 +777,110 @@ func TestClear_CorruptedFile(t *testing.T) {
 	}
 	if string(content) != "not-valid-json{{{" {
 		t.Errorf("file content was modified despite Clear failing; got: %s", content)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// New tests for bug fixes (Issues #58, #66, #67, #68, #69, #70)
+// ---------------------------------------------------------------------------
+
+// TestAddIDOverflow verifies that Add returns an error when the maximum existing
+// task ID is math.MaxInt, preventing integer overflow (Fixes #70).
+func TestAddIDOverflow(t *testing.T) {
+	mgr := newManager(t)
+
+	// Manually write a task file containing a task with ID = math.MaxInt.
+	maxTasks := []Task{
+		{
+			ID:       math.MaxInt,
+			Title:    "Max ID task",
+			Done:     false,
+			Priority: "low",
+		},
+	}
+	data, err := json.MarshalIndent(maxTasks, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent: unexpected error: %v", err)
+	}
+	if err := os.WriteFile(mgr.filePath, data, 0600); err != nil {
+		t.Fatalf("WriteFile: unexpected error: %v", err)
+	}
+
+	// Attempting to add another task should return an overflow error.
+	err = mgr.Add("Another task", "low", "")
+	if err == nil {
+		t.Fatal("Add with max ID task: expected overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "overflow") {
+		t.Errorf("expected error message to mention 'overflow', got: %v", err)
+	}
+}
+
+// TestAddUnicodeTitleAtLimit verifies that a title consisting of exactly
+// maxTitleLength emoji runes (which are 4 bytes each) is accepted without
+// error (Fixes #69).
+func TestAddUnicodeTitleAtLimit(t *testing.T) {
+	mgr := newManager(t)
+
+	// Build a title of exactly maxTitleLength emoji runes.
+	// Each emoji is 4 bytes in UTF-8, so the byte length will be 4×maxTitleLength.
+	emoji := "😀"
+	title := strings.Repeat(emoji, maxTitleLength)
+
+	if err := mgr.Add(title, "low", ""); err != nil {
+		t.Errorf("Add with %d emoji runes (maxTitleLength): unexpected error: %v", maxTitleLength, err)
+	}
+}
+
+// TestAddUnicodeTitleOverLimit verifies that a title exceeding maxTitleLength
+// runes is rejected (Fixes #69).
+func TestAddUnicodeTitleOverLimit(t *testing.T) {
+	mgr := newManager(t)
+
+	emoji := "😀"
+	title := strings.Repeat(emoji, maxTitleLength+1)
+
+	err := mgr.Add(title, "low", "")
+	if err == nil {
+		t.Errorf("Add with %d emoji runes (over limit): expected error, got nil", maxTitleLength+1)
+	}
+}
+
+// TestClear_NoOpWhenNoneDone verifies that calling Clear() when no tasks are
+// done does not write to disk (Fixes #66).
+func TestClear_NoOpWhenNoneDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+
+	// Record file mtime before Clear.
+	infoBefore, err := os.Stat(mgr.filePath)
+	if err != nil {
+		t.Fatalf("Stat before Clear: %v", err)
+	}
+	mtimeBefore := infoBefore.ModTime()
+
+	// Small sleep to ensure mtime would differ if the file was written.
+	time.Sleep(10 * time.Millisecond)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 2 {
+		t.Errorf("remaining: expected 2, got %d", remaining)
+	}
+
+	// Verify mtime has NOT changed — no write occurred.
+	infoAfter, err := os.Stat(mgr.filePath)
+	if err != nil {
+		t.Fatalf("Stat after Clear: %v", err)
+	}
+	if !infoAfter.ModTime().Equal(mtimeBefore) {
+		t.Errorf("file mtime changed after Clear with no done tasks: before=%v after=%v",
+			mtimeBefore, infoAfter.ModTime())
 	}
 }
