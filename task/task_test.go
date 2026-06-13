@@ -251,7 +251,8 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that an incomplete task with a future due
+// date is not reported as overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -261,12 +262,12 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with future due date to not be overdue")
+		t.Error("expected task with future due date NOT to be overdue")
 	}
 }
 
-// TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
+// TestIsOverdue_DoneTask verifies that a completed task with a past due date
+// is not reported as overdue (done tasks are never overdue).
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
@@ -276,30 +277,28 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
+		t.Error("expected completed task NOT to be overdue regardless of due date")
 	}
 }
 
 // TestIsOverdue_NoDueDate verifies that a task without a due date is never
-// considered overdue.
+// reported as overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
+		ID:    4,
+		Title: "No date task",
+		Done:  false,
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to not be overdue")
+		t.Error("expected task with no due date NOT to be overdue")
 	}
 }
 
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
-
 	_ = mgr.Add("Overdue task", "high", "2000-01-01")
-	_ = mgr.Add("Future task", "low", "2099-12-31")
+	_ = mgr.Add("Future task", "low", "2099-01-01")
 	_ = mgr.Add("No due date", "medium", "")
 
 	overdue, err := mgr.List("", true)
@@ -515,7 +514,7 @@ func TestListValidPriorities(t *testing.T) {
 		filter string
 		want   int
 	}{
-		{"", 3},      // no filter — all tasks
+		{"", 3},     // no filter — all tasks
 		{"high", 1},
 		{"medium", 1},
 		{"low", 1},
@@ -530,5 +529,160 @@ func TestListValidPriorities(t *testing.T) {
 				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Clear tests
+// ---------------------------------------------------------------------------
+
+// TestClear_MixedTasks verifies that Clear removes done tasks and keeps pending
+// ones, returning correct cleared/remaining counts.
+func TestClear_MixedTasks(t *testing.T) {
+	mgr := newManager(t)
+	// Add 5 tasks, mark 3 done.
+	_ = mgr.Add("Task 1", "high", "")
+	_ = mgr.Add("Task 2", "medium", "")
+	_ = mgr.Add("Task 3", "low", "")
+	_ = mgr.Add("Task 4", "high", "")
+	_ = mgr.Add("Task 5", "low", "")
+
+	all, _ := mgr.List("", false)
+	_ = mgr.Complete(all[0].ID)
+	_ = mgr.Complete(all[2].ID)
+	_ = mgr.Complete(all[4].ID)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 3 {
+		t.Errorf("cleared: expected 3, got %d", cleared)
+	}
+	if remaining != 2 {
+		t.Errorf("remaining: expected 2, got %d", remaining)
+	}
+
+	// Verify only pending tasks remain and none are done.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after Clear, got %d", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.Done {
+			t.Errorf("task %d (%q) should have been cleared but still exists as done", task.ID, task.Title)
+		}
+	}
+}
+
+// TestClear_AllDone verifies that Clear with all tasks done returns cleared=N,
+// remaining=0, and leaves an empty task list.
+func TestClear_AllDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
+
+	all, _ := mgr.List("", false)
+	for _, task := range all {
+		_ = mgr.Complete(task.ID)
+	}
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 3 {
+		t.Errorf("cleared: expected 3, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0, got %d", remaining)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected empty task list after clearing all done tasks, got %d", len(tasks))
+	}
+}
+
+// TestClear_NoneDone verifies that Clear with no completed tasks returns
+// cleared=0, remaining=N, and leaves the task list unchanged.
+func TestClear_NoneDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0, got %d", cleared)
+	}
+	if remaining != 3 {
+		t.Errorf("remaining: expected 3, got %d", remaining)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 tasks to remain after Clear with none done, got %d", len(tasks))
+	}
+}
+
+// TestClear_EmptyStore verifies that Clear on an empty store returns
+// cleared=0, remaining=0 without error.
+func TestClear_EmptyStore(t *testing.T) {
+	mgr := newManager(t)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear on empty store: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared: expected 0 on empty store, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining: expected 0 on empty store, got %d", remaining)
+	}
+}
+
+// TestClear_CorruptedFile verifies that Clear returns a non-nil error when the
+// backing file is corrupt (invalid JSON) and does NOT modify the store.
+func TestClear_CorruptedFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write corrupt JSON.
+	if err := os.WriteFile(filePath, []byte("not-valid-json{{{"), 0600); err != nil {
+		t.Fatalf("WriteFile: unexpected error: %v", err)
+	}
+
+	mgr, err := NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+
+	cleared, remaining, err := mgr.Clear()
+	if err == nil {
+		t.Fatalf("Clear on corrupted file: expected error, got nil (cleared=%d, remaining=%d)", cleared, remaining)
+	}
+
+	// State must be unmodified — the corrupt content should still be there.
+	content, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile after failed Clear: unexpected error: %v", readErr)
+	}
+	if string(content) != "not-valid-json{{{" {
+		t.Errorf("file content was modified despite Clear failing; got: %s", content)
 	}
 }
