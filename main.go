@@ -94,6 +94,14 @@ func runAdd(mgr *task.Manager, args []string) error {
 		return fmt.Errorf("add: task title must not be empty")
 	}
 
+	// Validate --due at the CLI layer before passing to the library.
+	// This produces a user-friendly error message with the exact format required.
+	if *due != "" {
+		if _, err := time.Parse("2006-01-02", *due); err != nil {
+			return fmt.Errorf("invalid date format for --due: %q. Expected YYYY-MM-DD", *due)
+		}
+	}
+
 	if err := mgr.Add(title, *priority, *due); err != nil {
 		return fmt.Errorf("add: %w", err)
 	}
