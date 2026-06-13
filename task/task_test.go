@@ -247,11 +247,12 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 	now := time.Now()
 	if !task.IsOverdue(now) {
-		t.Error("expected task with past due date to be overdue")
+		t.Errorf("IsOverdue: expected true for task with past due date %q", task.DueDate)
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that a task with a future due date is NOT
+// reported as overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -261,12 +262,12 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with future due date to not be overdue")
+		t.Errorf("IsOverdue: expected false for task with future due date %q", task.DueDate)
 	}
 }
 
-// TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
+// TestIsOverdue_DoneTask verifies that a completed task is never overdue even
+// if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
@@ -276,30 +277,29 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
+		t.Errorf("IsOverdue: expected false for completed task with past due date")
 	}
 }
 
-// TestIsOverdue_NoDueDate verifies that a task without a due date is never
-// considered overdue.
+// TestIsOverdue_NoDueDate verifies that a task with no due date is never
+// overdue regardless of its done state.
 func TestIsOverdue_NoDueDate(t *testing.T) {
-	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
+	tasks := []Task{
+		{ID: 4, Title: "No due date, pending", Done: false, DueDate: ""},
+		{ID: 5, Title: "No due date, done", Done: true, DueDate: ""},
 	}
 	now := time.Now()
-	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to not be overdue")
+	for _, task := range tasks {
+		if task.IsOverdue(now) {
+			t.Errorf("IsOverdue: expected false for task %q with no due date", task.Title)
+		}
 	}
 }
 
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
-
-	_ = mgr.Add("Overdue task", "high", "2000-01-01")
-	_ = mgr.Add("Future task", "low", "2099-12-31")
+	_ = mgr.Add("Overdue task", "high", "2000-06-15")
+	_ = mgr.Add("Future task", "medium", "2099-01-01")
 	_ = mgr.Add("No due date", "medium", "")
 
 	overdue, err := mgr.List("", true)
@@ -530,5 +530,169 @@ func TestListValidPriorities(t *testing.T) {
 				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Clear tests
+// ---------------------------------------------------------------------------
+
+// TestClear_NoTasks verifies that Clear on an empty store returns (0, nil).
+func TestClear_NoTasks(t *testing.T) {
+	mgr := newManager(t)
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear on empty store: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("Clear on empty store: expected cleared=0, got %d", cleared)
+	}
+}
+
+// TestClear_NoDoneTasks verifies that Clear on a store with only pending tasks
+// returns (0, nil) and leaves all tasks intact.
+func TestClear_NoDoneTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear with no done tasks: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("Clear with no done tasks: expected cleared=0, got %d", cleared)
+	}
+
+	// All tasks must still be present.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("after Clear with no done tasks: expected 3 tasks, got %d", len(tasks))
+	}
+}
+
+// TestClear_AllDone verifies that Clear removes all tasks when every task is
+// marked done, leaving the store empty and returning the correct cleared count.
+func TestClear_AllDone(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task 1", "high", "")
+	_ = mgr.Add("Task 2", "medium", "")
+	_ = mgr.Add("Task 3", "low", "")
+
+	tasks, _ := mgr.List("", false)
+	for _, task := range tasks {
+		if err := mgr.Complete(task.ID); err != nil {
+			t.Fatalf("Complete(%d): unexpected error: %v", task.ID, err)
+		}
+	}
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear all done: unexpected error: %v", err)
+	}
+	if cleared != 3 {
+		t.Errorf("Clear all done: expected cleared=3, got %d", cleared)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear all done: unexpected error: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("after Clear all done: expected 0 tasks remaining, got %d", len(remaining))
+	}
+}
+
+// TestClear_Mixed verifies that Clear removes only completed tasks, retains
+// pending tasks with their data intact, and returns the correct cleared count.
+func TestClear_Mixed(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Pending A", "high", "")
+	_ = mgr.Add("Done B", "medium", "")
+	_ = mgr.Add("Pending C", "low", "")
+	_ = mgr.Add("Done D", "high", "")
+	_ = mgr.Add("Pending E", "medium", "")
+
+	// Mark tasks B and D as done.
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[1].ID) // Done B
+	_ = mgr.Complete(tasks[3].ID) // Done D
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear mixed: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("Clear mixed: expected cleared=2, got %d", cleared)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear mixed: unexpected error: %v", err)
+	}
+	if len(remaining) != 3 {
+		t.Errorf("after Clear mixed: expected 3 tasks remaining, got %d", len(remaining))
+	}
+
+	// Ensure no remaining task is marked done.
+	for _, task := range remaining {
+		if task.Done {
+			t.Errorf("after Clear mixed: task %d (%q) should not be done", task.ID, task.Title)
+		}
+	}
+
+	// Ensure only pending tasks remain (by title).
+	pendingTitles := map[string]bool{"Pending A": true, "Pending C": true, "Pending E": true}
+	for _, task := range remaining {
+		if !pendingTitles[task.Title] {
+			t.Errorf("after Clear mixed: unexpected task %q in remaining list", task.Title)
+		}
+	}
+}
+
+// TestClear_IDsPreserved verifies that the IDs of remaining pending tasks are
+// not renumbered after a Clear operation.
+func TestClear_IDsPreserved(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task 1", "low", "")
+	_ = mgr.Add("Task 2", "medium", "")
+	_ = mgr.Add("Task 3", "high", "")
+
+	// Get the IDs before clear.
+	before, _ := mgr.List("", false)
+
+	// Mark task 2 as done.
+	_ = mgr.Complete(before[1].ID)
+	pendingID1 := before[0].ID
+	pendingID3 := before[2].ID
+
+	_, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+
+	after, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected 2 tasks after Clear, got %d", len(after))
+	}
+
+	// Verify the original IDs are preserved.
+	idSet := map[int]bool{}
+	for _, task := range after {
+		idSet[task.ID] = true
+	}
+	if !idSet[pendingID1] {
+		t.Errorf("ID %d (Task 1) should be preserved after Clear", pendingID1)
+	}
+	if !idSet[pendingID3] {
+		t.Errorf("ID %d (Task 3) should be preserved after Clear", pendingID3)
 	}
 }

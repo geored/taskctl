@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -255,7 +259,114 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// helper
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_EmptyStore verifies that runClear on an empty store returns nil.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear on empty store: unexpected error: %v", err)
+	}
+}
+
+// TestRunClear_NoDoneTasks verifies that runClear with only pending tasks
+// returns nil and all tasks are still present.
+func TestRunClear_NoDoneTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Pending 1"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Pending 2"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending 3"})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear with no done tasks: unexpected error: %v", err)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("runClear with no done tasks: expected 3 tasks remaining, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_ClearsCompleted verifies that runClear removes completed tasks
+// and only pending tasks remain after the call.
+func TestRunClear_ClearsCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Keep me"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Delete me"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Also keep me"})
+
+	tasks, _ := mgr.List("", false)
+	// Mark the second task as done.
+	_ = runDone(mgr, []string{intStr(tasks[1].ID)})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Errorf("expected 2 tasks remaining after runClear, got %d", len(remaining))
+	}
+	for _, task := range remaining {
+		if task.Done {
+			t.Errorf("task %d (%q) should not be done after runClear", task.ID, task.Title)
+		}
+	}
+}
+
+// TestRunClear_OutputFormat verifies that runClear prints the expected output
+// to stdout in the exact format: "Cleared N completed tasks. M tasks remaining.\n".
+func TestRunClear_OutputFormat(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task B"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task C"})
+
+	tasks, _ := mgr.List("", false)
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)}) // mark Task A done
+	_ = runDone(mgr, []string{intStr(tasks[1].ID)}) // mark Task B done
+
+	// Capture stdout.
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: unexpected error: %v", err)
+	}
+	os.Stdout = w
+
+	runErr := runClear(mgr)
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy: unexpected error: %v", err)
+	}
+
+	if runErr != nil {
+		t.Fatalf("runClear: unexpected error: %v", runErr)
+	}
+
+	got := buf.String()
+	want := fmt.Sprintf("Cleared %d completed tasks. %d tasks remaining.\n", 2, 1)
+	if got != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// helpers
 // ---------------------------------------------------------------------------
 
 // intStr converts an int to its string representation — avoids importing strconv

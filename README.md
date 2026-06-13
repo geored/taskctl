@@ -20,6 +20,7 @@
   - [done](#done)
   - [delete](#delete)
   - [stats](#stats)
+  - [clear](#clear)
 - [Examples](#examples)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -45,6 +46,7 @@
 | 📊 **Task statistics** | View total, pending, completed, overdue counts and completion rate with `stats` |
 | 📅 **Due dates** | Attach an optional due date (YYYY-MM-DD) to any task with `--due` |
 | ⚠️ **Overdue detection** | Tasks past their due date are flagged `[OVERDUE]`; filter with `--overdue` |
+| 🧹 **Clear completed** | Remove all done tasks in one command with `clear`; reports cleared and remaining counts |
 
 ---
 
@@ -262,6 +264,77 @@ Completion rate: 41%
 
 ---
 
+### `clear`
+
+Delete all tasks that are marked as done in a single operation. Pending (not-yet-done) tasks are left completely untouched.
+
+```
+taskctl clear
+```
+
+No flags are accepted. The command accepts no arguments.
+
+**Output format:**
+
+```
+Cleared N completed tasks. M tasks remaining.
+```
+
+Where `N` is the number of completed tasks removed and `M` is the number of pending tasks still in the store after the operation.
+
+**Examples:**
+
+```bash
+# Remove all completed tasks
+taskctl clear
+# Cleared 3 completed tasks. 5 tasks remaining.
+
+# When there are no completed tasks to remove
+taskctl clear
+# Cleared 0 completed tasks. 5 tasks remaining.
+
+# When the task list is empty
+taskctl clear
+# Cleared 0 completed tasks. 0 tasks remaining.
+```
+
+**Typical workflow:**
+
+```bash
+# 1. Add and complete some tasks
+taskctl add "Write tests"       --priority high
+taskctl add "Deploy to staging" --priority medium
+taskctl add "Update changelog"  --priority low
+taskctl done 1
+taskctl done 2
+
+# 2. Confirm which tasks are done
+taskctl list
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 1    [x]    high     -            Write tests
+# 2    [x]    medium   -            Deploy to staging
+# 3    [ ]    low      -            Update changelog
+
+# 3. Clear completed tasks
+taskctl clear
+# Cleared 2 completed tasks. 1 tasks remaining.
+
+# 4. Only pending tasks remain
+taskctl list
+# ID   Done   Priority Due Date     Title
+# ------------------------------------------------------
+# 3    [ ]    low      -            Update changelog
+```
+
+**Notes:**
+
+- IDs of remaining tasks are **not** renumbered after a `clear` — task 3 stays task 3.
+- `clear` is atomic: it uses the same write-to-temp-then-rename pattern as all other write operations, so a crash mid-clear cannot corrupt the task store.
+- Running `clear` on an empty store or a store with no completed tasks is safe and always returns `(0, nil)`.
+
+---
+
 ## Examples
 
 A full end-to-end workflow:
@@ -308,59 +381,41 @@ taskctl list --priority high
 # 1    [x]    high     2025-02-01   Plan sprint
 # 4    [ ]    high     2025-01-20   Fix login bug [OVERDUE]
 
-# 7. Delete a task
-taskctl delete 3
-# Task 3 deleted.
-
-# 8. Check statistics
+# 7. Check stats
 taskctl stats
-# Total tasks:     4
-#   Pending:       3
+# Total tasks:     5
+#   Pending:       4
 #   Completed:     1
 #   Overdue:       1
 #   High priority: 2
 #   Med priority:  2
-#   Low priority:  0
-# Completion rate: 25%
+#   Low priority:  1
+# Completion rate: 20%
+
+# 8. Delete a task
+taskctl delete 3
+# Task 3 deleted.
+
+# 9. Clear all completed tasks
+taskctl clear
+# Cleared 1 completed tasks. 3 tasks remaining.
 ```
 
 ---
 
 ## Testing
 
-The test suite lives in `task/task_test.go` and uses the standard Go testing library — no external dependencies required.
-
 ```bash
 # Run all tests
 go test ./...
 
-# Run tests with verbose output
-go test -v ./...
-
-# Run tests for the task package only
-go test -v ./task/...
-
-# Run tests with race-condition detection
+# Run tests with race detection
 go test -race ./...
 
-# Generate a coverage report
+# Run tests with coverage report
 go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
+go tool cover -html=coverage.out
 ```
-
-The test suite covers:
-
-- Task creation with all priority levels
-- Task creation with and without due dates (including invalid date validation)
-- Listing tasks (unfiltered)
-- Filtering tasks by `low`, `medium`, and `high` priority
-- Filtering tasks by overdue status (`--overdue`)
-- Marking tasks as done
-- Deleting tasks
-- Edge cases (invalid IDs, invalid date formats, no due date)
-- Task statistics (`stats` command): empty store, mixed tasks, all completed, completion rate, overdue counts
-- File permission verification (tasks file written with mode `0600`)
-- Atomic save correctness (no partial-write corruption)
 
 ---
 
@@ -368,12 +423,12 @@ The test suite covers:
 
 ```
 taskctl/
-├── main.go          # CLI entry point — command parsing and dispatch
+├── main.go          # CLI entry point: argument parsing, command dispatch
+├── main_test.go     # Integration-level tests for each CLI handler
 ├── go.mod           # Go module definition
 ├── Dockerfile       # Multi-stage Docker build
-├── .gitignore       # Git ignore rules
 └── task/
-    ├── task.go      # Core task logic: Task struct, storage, CRUD, filtering, stats
+    ├── task.go      # Manager: Add, List, Complete, Delete, Clear, Stats
     └── task_test.go # Unit tests for the task package
 ```
 
