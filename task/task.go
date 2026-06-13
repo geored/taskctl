@@ -15,6 +15,11 @@ import (
 // dateLayout is the canonical date format accepted and displayed by taskctl.
 const dateLayout = "2006-01-02"
 
+// maxTitleLength is the maximum number of characters allowed in a task title.
+// Titles longer than this are rejected at the Add boundary to prevent
+// unbounded storage growth and UI display issues.
+const maxTitleLength = 256
+
 // Task represents a single to-do item.
 type Task struct {
 	ID       int    `json:"id"`
@@ -31,6 +36,10 @@ type Task struct {
 // Tasks with no due date are never considered overdue.
 // If DueDate is a non-empty string that cannot be parsed, IsOverdue logs a
 // warning and returns false.
+//
+// Comparison is performed in UTC so that the result is consistent regardless
+// of the local timezone: a task due on date D is considered overdue only when
+// the UTC date of `now` is strictly after D.
 func (t Task) IsOverdue(now time.Time) bool {
 	if t.Done || t.DueDate == "" {
 		return false
@@ -40,9 +49,13 @@ func (t Task) IsOverdue(now time.Time) bool {
 		log.Printf("warning: task %d has malformed due date %q: %v", t.ID, t.DueDate, err)
 		return false
 	}
-	// Truncate both sides to date-only precision so that a task due today is
-	// not considered overdue until tomorrow.
-	return now.Truncate(24 * time.Hour).After(due)
+	// Normalise `now` to UTC midnight so the comparison is purely date-based
+	// and is not affected by the host's local timezone.
+	nowUTC := now.UTC()
+	nowDate := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	// `due` is already in UTC midnight because time.Parse uses UTC when no
+	// timezone is embedded in the layout/value.
+	return nowDate.After(due)
 }
 
 // Manager handles persistence and business logic for the task list.
@@ -134,14 +147,18 @@ func (m *Manager) save(tasks []Task) error {
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
-// title must be a non-empty string.
+// title must be a non-empty string of at most maxTitleLength characters.
 // priority must be one of "high", "medium", or "low".
 // dueDate must be in YYYY-MM-DD format or empty string for no due date.
 // Returns an error if any input is invalid.
 func (m *Manager) Add(title, priority, dueDate string) error {
 	// Validate title at the public API boundary.
-	if strings.TrimSpace(title) == "" {
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
 		return fmt.Errorf("task title must not be empty")
+	}
+	if len(trimmed) > maxTitleLength {
+		return fmt.Errorf("task title must not exceed %d characters (got %d)", maxTitleLength, len(trimmed))
 	}
 
 	// Validate priority at the public API boundary.
@@ -177,7 +194,7 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 
 	tasks = append(tasks, Task{
 		ID:       nextID,
-		Title:    strings.TrimSpace(title),
+		Title:    trimmed,
 		Done:     false,
 		Priority: priority,
 		DueDate:  dueDate,
