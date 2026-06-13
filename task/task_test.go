@@ -590,8 +590,9 @@ func TestClear_AllCompleted(t *testing.T) {
 	_ = mgr.Add("Task 3", "low", "")
 
 	tasks, _ := mgr.List("", false)
-	for _, t := range tasks {
-		_ = mgr.Complete(t.ID)
+	// Use tk to avoid shadowing the *testing.T parameter t.
+	for _, tk := range tasks {
+		_ = mgr.Complete(tk.ID)
 	}
 
 	cleared, remaining, err := mgr.Clear()
