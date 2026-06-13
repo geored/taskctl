@@ -44,9 +44,11 @@ func (t Task) IsOverdue(now time.Time) bool {
 // Manager handles persistence and business logic for the task list.
 // A mutex is embedded to serialise access when multiple goroutines (or, via
 // OS-level file locks, multiple processes) share the same Manager instance.
+//
+// TODO(#17): add OS-level file locking for multi-process safety.
 type Manager struct {
 	filePath string
-	mu       sync.Mutex
+	mu       sync.Mutex // TODO(#17): add OS-level file locking for multi-process safety
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
@@ -172,10 +174,27 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 	return m.save(tasks)
 }
 
+// isValidPriority reports whether p is a valid priority value for filtering.
+// An empty string is also valid (meaning "no filter").
+func isValidPriority(p string) bool {
+	switch p {
+	case "", "low", "medium", "high":
+		return true
+	default:
+		return false
+	}
+}
+
 // List returns all tasks, optionally filtered by priority and/or overdue status.
-// When priority is non-empty only tasks with that priority are returned.
+// priority must be one of "low", "medium", "high", or "" (empty = no filter).
 // When overdueOnly is true only incomplete tasks whose due date has passed are returned.
+// Returns an error if priority is not a valid value.
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
+	// Validate priority at the library boundary — consistent with Add().
+	if !isValidPriority(priority) {
+		return nil, fmt.Errorf("invalid priority %q: must be low, medium, high, or empty string", priority)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
