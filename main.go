@@ -31,20 +31,26 @@ func main() {
 	}
 	cmd := os.Args[1]
 
+	var runErr error
 	switch cmd {
 	case "add":
-		runAdd(mgr, os.Args[2:])
+		runErr = runAdd(mgr, os.Args[2:])
 	case "list":
-		runList(mgr, os.Args[2:])
+		runErr = runList(mgr, os.Args[2:])
 	case "done":
-		runDone(mgr, os.Args[2:])
+		runErr = runDone(mgr, os.Args[2:])
 	case "delete":
-		runDelete(mgr, os.Args[2:])
+		runErr = runDelete(mgr, os.Args[2:])
 	case "stats":
-		runStats(mgr)
+		runErr = runStats(mgr)
 	default:
 		log.Printf("unknown command: %s", cmd)
 		printUsage()
+		os.Exit(1)
+	}
+
+	if runErr != nil {
+		log.Printf("%v", runErr)
 		os.Exit(1)
 	}
 }
@@ -64,66 +70,65 @@ Commands:
 // runAdd handles the "add" sub-command.
 // Flags: --priority (default "medium"), --due (optional, YYYY-MM-DD).
 // Remaining args after flag parsing are joined as the task title.
-func runAdd(mgr *task.Manager, args []string) {
-	fs := flag.NewFlagSet("add", flag.ExitOnError)
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runAdd(mgr *task.Manager, args []string) error {
+	fs := flag.NewFlagSet("add", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	priority := fs.String("priority", "medium", "Task priority: low, medium, high")
 	due := fs.String("due", "", "Optional due date in YYYY-MM-DD format")
 	if err := fs.Parse(args); err != nil {
-		log.Printf("add: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("add: %w", err)
 	}
 
 	if fs.NArg() == 0 {
-		log.Print("add: task title is required")
-		os.Exit(1)
+		return fmt.Errorf("add: task title is required")
 	}
 
 	// Join remaining positional arguments as the title so that users do not
 	// need to quote multi-word titles.
 	title := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if title == "" {
-		log.Print("add: task title must not be empty")
-		os.Exit(1)
+		return fmt.Errorf("add: task title must not be empty")
 	}
 
 	if err := mgr.Add(title, *priority, *due); err != nil {
-		log.Printf("add: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("add: %w", err)
 	}
 	fmt.Println("Task added.")
+	return nil
 }
 
 // runList handles the "list" sub-command.
 // Flags: --priority (filter by priority), --overdue (show only overdue tasks).
-func runList(mgr *task.Manager, args []string) {
-	fs := flag.NewFlagSet("list", flag.ExitOnError)
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runList(mgr *task.Manager, args []string) error {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	priority := fs.String("priority", "", "Filter by priority: low, medium, high")
 	overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
 	if err := fs.Parse(args); err != nil {
-		log.Printf("list: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("list: %w", err)
 	}
 
 	// Validate the --priority flag value at the CLI boundary.
+	// (Library also validates, but this gives a cleaner CLI-level error message.)
 	if *priority != "" {
 		switch *priority {
 		case "low", "medium", "high":
 			// valid
 		default:
-			log.Printf("list: invalid priority %q: must be low, medium, or high", *priority)
-			os.Exit(1)
+			return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)
 		}
 	}
 
 	tasks, err := mgr.List(*priority, *overdueOnly)
 	if err != nil {
-		log.Printf("list: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("list: %w", err)
 	}
 
 	if len(tasks) == 0 {
 		fmt.Println("No tasks found.")
-		return
+		return nil
 	}
 
 	now := time.Now()
@@ -151,52 +156,63 @@ func runList(mgr *task.Manager, args []string) {
 
 		fmt.Printf("%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)
 	}
+	return nil
 }
 
 // runDone handles the "done" sub-command.
-func runDone(mgr *task.Manager, args []string) {
-	if len(args) == 0 {
-		log.Print("done: task ID is required")
-		os.Exit(1)
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDone(mgr *task.Manager, args []string) error {
+	fs := flag.NewFlagSet("done", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("done: %w", err)
 	}
-	id, err := strconv.Atoi(args[0])
+
+	if fs.NArg() == 0 {
+		return fmt.Errorf("done: task ID is required")
+	}
+	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		log.Printf("done: invalid task ID: %s", args[0])
-		os.Exit(1)
+		return fmt.Errorf("done: invalid task ID: %s", fs.Arg(0))
 	}
 	if err := mgr.Complete(id); err != nil {
-		log.Printf("done: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("done: %w", err)
 	}
 	fmt.Printf("Task %d marked as done.\n", id)
+	return nil
 }
 
 // runDelete handles the "delete" sub-command.
-func runDelete(mgr *task.Manager, args []string) {
-	if len(args) == 0 {
-		log.Print("delete: task ID is required")
-		os.Exit(1)
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDelete(mgr *task.Manager, args []string) error {
+	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("delete: %w", err)
 	}
-	id, err := strconv.Atoi(args[0])
+
+	if fs.NArg() == 0 {
+		return fmt.Errorf("delete: task ID is required")
+	}
+	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		log.Printf("delete: invalid task ID: %s", args[0])
-		os.Exit(1)
+		return fmt.Errorf("delete: invalid task ID: %s", fs.Arg(0))
 	}
 	if err := mgr.Delete(id); err != nil {
-		log.Printf("delete: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("delete: %w", err)
 	}
 	fmt.Printf("Task %d deleted.\n", id)
+	return nil
 }
 
 // runStats handles the "stats" sub-command.
 // It prints a summary that includes completion counts, overdue count,
 // per-priority task counts, and the overall completion rate.
-func runStats(mgr *task.Manager) {
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runStats(mgr *task.Manager) error {
 	s, err := mgr.Stats()
 	if err != nil {
-		log.Printf("stats: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("stats: %w", err)
 	}
 
 	pct := 0
@@ -212,4 +228,5 @@ func runStats(mgr *task.Manager) {
 	fmt.Printf("  Med priority:  %d\n", s.MediumPriority)
 	fmt.Printf("  Low priority:  %d\n", s.LowPriority)
 	fmt.Printf("Completion rate: %d%%\n", pct)
+	return nil
 }

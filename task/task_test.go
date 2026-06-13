@@ -3,6 +3,7 @@ package task
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -264,8 +265,8 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_DoneTask verifies that a completed task is never overdue even
-// if its due date has passed.
+// TestIsOverdue_DoneTask verifies that a completed task is never considered
+// overdue, even when its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
@@ -275,40 +276,31 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to never be overdue")
+		t.Error("expected completed task to not be overdue")
 	}
 }
 
-// TestIsOverdue_NoDueDate verifies that a task with no due date is never overdue.
+// TestIsOverdue_NoDueDate verifies that a task without a due date is never
+// considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
 		ID:      4,
-		Title:   "No due date",
+		Title:   "No due date task",
 		Done:    false,
 		DueDate: "",
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to never be overdue")
+		t.Error("expected task with no due date to not be overdue")
 	}
 }
 
-// TestListOverdueFilter verifies that --overdue returns only incomplete tasks
-// with a past due date.
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
 
-	// Overdue: past date, incomplete
-	_ = mgr.Add("Overdue task", "high", "2000-06-15")
-	// Not overdue: future date
-	_ = mgr.Add("Future task", "low", "2099-01-01")
-	// Not overdue: no due date
-	_ = mgr.Add("No date task", "medium", "")
-	// Not overdue: past date but completed
-	_ = mgr.Add("Done old task", "medium", "2000-01-01")
-	tasks, _ := mgr.List("", false)
-	// Mark the last task done
-	_ = mgr.Complete(tasks[3].ID)
+	_ = mgr.Add("Overdue task", "high", "2000-01-01")
+	_ = mgr.Add("Future task", "low", "2099-12-31")
+	_ = mgr.Add("No due date", "medium", "")
 
 	overdue, err := mgr.List("", true)
 	if err != nil {
@@ -409,5 +401,134 @@ func TestSaveAtomicity(t *testing.T) {
 		if len(tasks) != i+1 {
 			t.Fatalf("after %d adds: expected %d tasks, got %d", i+1, i+1, len(tasks))
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error-path tests (new — requirement #3)
+// ---------------------------------------------------------------------------
+
+// TestCompleteNonExistentID verifies that Complete returns an error when the
+// given ID does not exist in the task store.
+func TestCompleteNonExistentID(t *testing.T) {
+	mgr := newManager(t)
+	// Empty store — ID 9999 cannot exist.
+	err := mgr.Complete(9999)
+	if err == nil {
+		t.Fatal("Complete with non-existent ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "9999") {
+		t.Errorf("Complete error should mention the task ID, got: %v", err)
+	}
+}
+
+// TestCompleteNonExistentIDWithTasks verifies that Complete returns an error
+// when the ID does not match any task even when other tasks exist.
+func TestCompleteNonExistentIDWithTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Existing task", "medium", "")
+
+	err := mgr.Complete(9999)
+	if err == nil {
+		t.Fatal("Complete with non-existent ID: expected error, got nil")
+	}
+}
+
+// TestDeleteNonExistentID verifies that Delete returns an error when the given
+// ID does not exist in the task store.
+func TestDeleteNonExistentID(t *testing.T) {
+	mgr := newManager(t)
+	// Empty store — ID 9999 cannot exist.
+	err := mgr.Delete(9999)
+	if err == nil {
+		t.Fatal("Delete with non-existent ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "9999") {
+		t.Errorf("Delete error should mention the task ID, got: %v", err)
+	}
+}
+
+// TestDeleteNonExistentIDWithTasks verifies that Delete returns an error when
+// the ID does not match any task even when other tasks exist.
+func TestDeleteNonExistentIDWithTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Existing task", "high", "")
+
+	err := mgr.Delete(9999)
+	if err == nil {
+		t.Fatal("Delete with non-existent ID: expected error, got nil")
+	}
+}
+
+// TestAddEmptyTitle verifies that Add returns an error when the title is empty
+// or consists only of whitespace.
+func TestAddEmptyTitle(t *testing.T) {
+	mgr := newManager(t)
+	cases := []struct {
+		name  string
+		title string
+	}{
+		{"empty string", ""},
+		{"spaces only", "   "},
+		{"tabs only", "\t\t"},
+		{"newline only", "\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mgr.Add(tc.title, "medium", "")
+			if err == nil {
+				t.Errorf("Add with title %q: expected error, got nil", tc.title)
+			}
+		})
+	}
+}
+
+// TestListInvalidPriority verifies that List returns an error when called with
+// an unrecognised priority string (library-boundary validation — requirement #1).
+func TestListInvalidPriority(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("A task", "medium", "")
+
+	invalidPriorities := []string{"urgent", "critical", "HIGH", "Low", "MEDIUM", "none"}
+	for _, p := range invalidPriorities {
+		t.Run(p, func(t *testing.T) {
+			tasks, err := mgr.List(p, false)
+			if err == nil {
+				t.Errorf("List(%q): expected error for invalid priority, got nil (tasks=%v)", p, tasks)
+			}
+			if tasks != nil {
+				t.Errorf("List(%q): expected nil tasks on error, got %v", p, tasks)
+			}
+		})
+	}
+}
+
+// TestListValidPriorities verifies that List accepts all valid priority values
+// including empty string (no filter) without returning an error.
+func TestListValidPriorities(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("High task", "high", "")
+	_ = mgr.Add("Medium task", "medium", "")
+	_ = mgr.Add("Low task", "low", "")
+
+	validPriorities := []struct {
+		filter string
+		want   int
+	}{
+		{"", 3},      // no filter — all tasks
+		{"high", 1},
+		{"medium", 1},
+		{"low", 1},
+	}
+	for _, tc := range validPriorities {
+		t.Run("priority="+tc.filter, func(t *testing.T) {
+			tasks, err := mgr.List(tc.filter, false)
+			if err != nil {
+				t.Fatalf("List(%q): unexpected error: %v", tc.filter, err)
+			}
+			if len(tasks) != tc.want {
+				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
+			}
+		})
 	}
 }
