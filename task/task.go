@@ -50,11 +50,8 @@ type Manager struct {
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
-// filePath is cleaned with filepath.Clean before use. Note that this does NOT
-// prevent callers from supplying traversal paths such as "../../etc/shadow";
-// it is the caller's responsibility to ensure filePath is within an expected
-// directory. In main.go the path is hardcoded, so no user-supplied input
-// reaches this function.
+// filePath is cleaned with filepath.Clean before use. Paths that start with
+// ".." (after cleaning) are rejected to prevent directory traversal.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 	// Reject obvious traversal attempts: if the cleaned path starts with ".."
@@ -174,8 +171,19 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 
 // List returns all tasks, optionally filtered by priority and/or overdue status.
 // When priority is non-empty only tasks with that priority are returned.
+// An invalid non-empty priority value returns an error.
 // When overdueOnly is true only incomplete tasks whose due date has passed are returned.
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
+	// Validate priority at the public API boundary (mirrors Add validation).
+	if priority != "" {
+		switch priority {
+		case "high", "medium", "low":
+			// valid
+		default:
+			return nil, fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
