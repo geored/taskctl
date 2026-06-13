@@ -52,18 +52,25 @@ type Manager struct {
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
-// filePath is cleaned with filepath.Clean before use. Note that this does NOT
-// prevent callers from supplying traversal paths such as "../../etc/shadow";
-// it is the caller's responsibility to ensure filePath is within an expected
-// directory. In main.go the path is hardcoded, so no user-supplied input
-// reaches this function.
+// filePath is cleaned with filepath.Clean before use. The library enforces
+// that filePath must be a relative path that does not escape the current
+// working directory: absolute paths and paths beginning with ".." are both
+// rejected with a descriptive error.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
+
+	// Reject absolute paths — the library only supports relative paths within
+	// the current working directory.
+	if filepath.IsAbs(clean) {
+		return nil, fmt.Errorf("NewManager: path %q must be a relative path", filePath)
+	}
+
 	// Reject obvious traversal attempts: if the cleaned path starts with ".."
-	// it is pointing outside the current working directory.
+	// it points outside the current working directory.
 	if strings.HasPrefix(clean, "..") {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
 	}
+
 	return &Manager{filePath: clean}, nil
 }
 

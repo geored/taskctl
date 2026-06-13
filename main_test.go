@@ -5,17 +5,40 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/geored/taskctl/task"
 )
 
+// chdirTemp changes the working directory to a fresh temporary directory for
+// the duration of the test and restores the original directory on cleanup.
+// It returns the absolute path of the temporary directory.
+func chdirTemp(t *testing.T) string {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("chdirTemp: Getwd: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdirTemp: Chdir(%q): %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("chdirTemp cleanup: Chdir(%q): %v", orig, err)
+		}
+	})
+	return dir
+}
+
 // newTestManager creates a Manager backed by a temp file isolated per test.
+// It changes the working directory to a fresh temp directory so that the
+// relative path "tasks.json" resolves to an isolated, per-test location.
 func newTestManager(t *testing.T) *task.Manager {
 	t.Helper()
-	mgr, err := task.NewManager(filepath.Join(t.TempDir(), "tasks.json"))
+	chdirTemp(t)
+	mgr, err := task.NewManager("tasks.json")
 	if err != nil {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
@@ -346,15 +369,17 @@ func TestRunClear_EmptyStore(t *testing.T) {
 // TestRunClear_Error verifies that runClear returns a non-nil error (wrapped
 // with "clear:") when Manager.Clear() fails due to a corrupted storage file.
 func TestRunClear_Error(t *testing.T) {
-	dir := t.TempDir()
-	filePath := filepath.Join(dir, "tasks.json")
+	// Change into a fresh temp directory so we can use a relative path.
+	chdirTemp(t)
+
+	const relPath = "tasks.json"
 
 	// Write invalid JSON so that load() will fail.
-	if err := os.WriteFile(filePath, []byte("{bad json"), 0600); err != nil {
+	if err := os.WriteFile(relPath, []byte("{bad json"), 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	mgr, err := task.NewManager(filePath)
+	mgr, err := task.NewManager(relPath)
 	if err != nil {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
