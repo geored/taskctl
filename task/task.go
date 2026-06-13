@@ -52,12 +52,16 @@ type Manager struct {
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
-// filePath is cleaned with filepath.Clean before use. Note that this does NOT
-// prevent callers from supplying traversal paths such as "../../etc/shadow";
-// it is the caller's responsibility to ensure filePath is within an expected
-// directory. In main.go the path is hardcoded, so no user-supplied input
-// reaches this function.
+// filePath must be a non-empty string. It is cleaned with filepath.Clean before
+// use. Note that this does NOT prevent callers from supplying traversal paths
+// such as "../../etc/shadow"; it is the caller's responsibility to ensure
+// filePath is within an expected directory. In main.go the path is hardcoded,
+// so no user-supplied input reaches this function.
 func NewManager(filePath string) (*Manager, error) {
+	// Reject empty paths — a Manager without a backing file is nonsensical.
+	if filePath == "" {
+		return nil, fmt.Errorf("NewManager: file path must not be empty")
+	}
 	clean := filepath.Clean(filePath)
 	// Reject obvious traversal attempts: if the cleaned path starts with ".."
 	// it is pointing outside the current working directory.
@@ -263,7 +267,9 @@ func (m *Manager) Clear() (int, error) {
 
 	tasks, err := m.load()
 	if err != nil {
-		return 0, fmt.Errorf("clear: %w", err)
+		// Do not add a "clear: " prefix here — error context belongs at the
+		// CLI layer (runClear) to avoid double-prefixed messages.
+		return 0, err
 	}
 
 	remaining := make([]Task, 0, len(tasks))
@@ -282,7 +288,9 @@ func (m *Manager) Clear() (int, error) {
 	}
 
 	if err := m.save(remaining); err != nil {
-		return 0, fmt.Errorf("clear: %w", err)
+		// Do not add a "clear: " prefix here — error context belongs at the
+		// CLI layer (runClear) to avoid double-prefixed messages.
+		return 0, err
 	}
 	return cleared, nil
 }
