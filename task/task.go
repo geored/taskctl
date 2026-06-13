@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,12 +29,15 @@ type Task struct {
 // IsOverdue reports whether the task is incomplete and its due date has passed
 // relative to the given reference time (typically time.Now()).
 // Tasks with no due date are never considered overdue.
+// If DueDate is a non-empty string that cannot be parsed, IsOverdue logs a
+// warning and returns false.
 func (t Task) IsOverdue(now time.Time) bool {
 	if t.Done || t.DueDate == "" {
 		return false
 	}
 	due, err := time.Parse(dateLayout, t.DueDate)
 	if err != nil {
+		log.Printf("warning: task %d has malformed due date %q: %v", t.ID, t.DueDate, err)
 		return false
 	}
 	// Truncate both sides to date-only precision so that a task due today is
@@ -199,7 +203,7 @@ func isValidPriority(p string) bool {
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	// Validate priority at the library boundary — consistent with Add().
 	if !isValidPriority(priority) {
-		return nil, fmt.Errorf("invalid priority %q: must be low, medium, high, or empty string", priority)
+		return nil, fmt.Errorf("invalid priority filter %q: must be low, medium, or high", priority)
 	}
 
 	m.mu.Lock()
@@ -225,7 +229,12 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 }
 
 // Complete marks the task with the given ID as done.
+// id must be a positive integer; returns an error for id <= 0.
 func (m *Manager) Complete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid id %d: must be a positive integer", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -243,7 +252,12 @@ func (m *Manager) Complete(id int) error {
 }
 
 // Delete removes the task with the given ID.
+// id must be a positive integer; returns an error for id <= 0.
 func (m *Manager) Delete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid id %d: must be a positive integer", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
