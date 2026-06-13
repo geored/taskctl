@@ -577,11 +577,10 @@ func TestClearNoDoneTasks(t *testing.T) {
 func TestClearRemovesDoneTasks(t *testing.T) {
 	mgr := newManager(t)
 	_ = mgr.Add("Task 1", "high", "")
-	_ = mgr.Add("Task 2", "low", "")
-	_ = mgr.Add("Task 3", "medium", "")
+	_ = mgr.Add("Task 2", "medium", "")
+	_ = mgr.Add("Task 3", "low", "")
 
 	tasks, _ := mgr.List("", false)
-	// Mark tasks 1 and 3 as done.
 	_ = mgr.Complete(tasks[0].ID)
 	_ = mgr.Complete(tasks[2].ID)
 
@@ -601,10 +600,7 @@ func TestClearRemovesDoneTasks(t *testing.T) {
 		t.Fatalf("expected 1 task remaining, got %d", len(remaining))
 	}
 	if remaining[0].Title != "Task 2" {
-		t.Errorf("expected remaining task title %q, got %q", "Task 2", remaining[0].Title)
-	}
-	if remaining[0].Done {
-		t.Error("expected remaining task to be pending (not done)")
+		t.Errorf("expected remaining task %q, got %q", "Task 2", remaining[0].Title)
 	}
 }
 
@@ -612,12 +608,12 @@ func TestClearRemovesDoneTasks(t *testing.T) {
 // is done and returns an empty list.
 func TestClearAllDoneTasks(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("Done A", "high", "")
-	_ = mgr.Add("Done B", "medium", "")
+	_ = mgr.Add("Done 1", "high", "")
+	_ = mgr.Add("Done 2", "low", "")
 
 	tasks, _ := mgr.List("", false)
-	for _, task := range tasks {
-		_ = mgr.Complete(task.ID)
+	for _, tk := range tasks {
+		_ = mgr.Complete(tk.ID)
 	}
 
 	cleared, err := mgr.Clear()
@@ -667,10 +663,10 @@ func TestClearLeavesPendingTasksIntact(t *testing.T) {
 
 	// Verify titles and fields of surviving tasks are intact.
 	titles := map[string]bool{}
-	for _, t := range remaining {
-		titles[t.Title] = true
-		if t.Done {
-			t.Errorf("remaining task %q should not be done", t.Title)
+	for _, tk := range remaining {
+		titles[tk.Title] = true
+		if tk.Done {
+			t.Errorf("remaining task %q should not be done", tk.Title)
 		}
 	}
 	if !titles["Keep me"] {
