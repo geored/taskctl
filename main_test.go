@@ -268,6 +268,7 @@ func TestRunClear_HappyPath(t *testing.T) {
 	_ = runAdd(mgr, []string{"--priority", "low", "Pending task"})
 
 	tasks, _ := mgr.List("", false)
+
 	// Mark the first task as done.
 	_ = mgr.Complete(tasks[0].ID)
 
@@ -337,14 +338,11 @@ func TestRunClear_ErrorPath(t *testing.T) {
 	if !strings.HasPrefix(runErr.Error(), "clear: ") {
 		t.Errorf("error should be wrapped with 'clear: ' prefix, got: %v", runErr)
 	}
-	// The wrapped error must not be double-wrapped.
-	var innerErr error
-	if errors.As(runErr, &innerErr) {
-		// Unwrap one level — should not contain another "clear: " prefix.
-		unwrapped := errors.Unwrap(runErr)
-		if unwrapped != nil && strings.HasPrefix(unwrapped.Error(), "clear: ") {
-			t.Errorf("error is double-wrapped with 'clear: ' prefix: %v", runErr)
-		}
+	// Verify the error is not double-wrapped: unwrap one level and confirm
+	// the inner error does not also start with "clear: ".
+	unwrapped := errors.Unwrap(runErr)
+	if unwrapped != nil && strings.HasPrefix(unwrapped.Error(), "clear: ") {
+		t.Errorf("error is double-wrapped with 'clear: ' prefix: %v", runErr)
 	}
 }
 
