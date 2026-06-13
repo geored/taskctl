@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +20,29 @@ func newTestManager(t *testing.T) *task.Manager {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
 	return mgr
+}
+
+// captureStdout redirects os.Stdout for the duration of f and returns the
+// captured output as a string.
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+
+	f()
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy: %v", err)
+	}
+	return buf.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -255,30 +282,116 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_ClearsCompletedTasks verifies that runClear removes done tasks
+// and prints the correct message reporting the number cleared and remaining.
+func TestRunClear_ClearsCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task 3"})
+
+	tasks, _ := mgr.List("", false)
+	// Mark tasks 1 and 3 done.
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+	_ = runDone(mgr, []string{intStr(tasks[2].ID)})
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr, []string{}); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 2 completed tasks. 1 tasks remaining."
+	if !strings.Contains(out, want) {
+		t.Errorf("runClear output: want %q, got %q", want, out)
+	}
+}
+
+// TestRunClear_NoDoneTasks verifies that runClear prints "Cleared 0" and the
+// correct remaining count when no tasks are completed.
+func TestRunClear_NoDoneTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Pending A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending B"})
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr, []string{}); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 0 completed tasks. 2 tasks remaining."
+	if !strings.Contains(out, want) {
+		t.Errorf("runClear output: want %q, got %q", want, out)
+	}
+}
+
+// TestRunClear_EmptyStore verifies that runClear on an empty store succeeds and
+// reports zero cleared and zero remaining.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr, []string{}); err != nil {
+			t.Errorf("runClear on empty store: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 0 completed tasks. 0 tasks remaining."
+	if !strings.Contains(out, want) {
+		t.Errorf("runClear output: want %q, got %q", want, out)
+	}
+}
+
+// TestRunClear_AllCleared verifies that runClear reports 0 remaining when all
+// tasks are completed.
+func TestRunClear_AllCleared(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Done A"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Done B"})
+
+	tasks, _ := mgr.List("", false)
+	for _, task := range tasks {
+		_ = runDone(mgr, []string{intStr(task.ID)})
+	}
+
+	out := captureStdout(t, func() {
+		if err := runClear(mgr, []string{}); err != nil {
+			t.Errorf("runClear all cleared: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 2 completed tasks. 0 tasks remaining."
+	if !strings.Contains(out, want) {
+		t.Errorf("runClear output: want %q, got %q", want, out)
+	}
+}
+
+// TestRunClear_ReturnsNoError verifies that runClear returns nil on success.
+func TestRunClear_ReturnsNoError(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "low", "A task"})
+
+	tasks, _ := mgr.List("", false)
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+
+	_ = captureStdout(t, func() {
+		err := runClear(mgr, []string{})
+		if err != nil {
+			t.Errorf("runClear: expected nil error, got %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
 // intStr converts an int to its string representation — avoids importing strconv
 // in the test file directly.
 func intStr(n int) string {
-	return strings.TrimSpace(strings.ReplaceAll(strings.Repeat("x", n), "x", "")[0:0]) + itoa(n)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if neg {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
+	return fmt.Sprintf("%d", n)
 }

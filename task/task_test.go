@@ -251,7 +251,8 @@ func TestIsOverdue_PastDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
+// TestIsOverdue_FutureDate verifies that an incomplete task with a future due
+// date is not considered overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
 	task := Task{
 		ID:      2,
@@ -265,8 +266,8 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 	}
 }
 
-// TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
+// TestIsOverdue_DoneTask verifies that a completed task is never overdue even
+// if its due date is in the past.
 func TestIsOverdue_DoneTask(t *testing.T) {
 	task := Task{
 		ID:      3,
@@ -276,7 +277,7 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
+		t.Error("expected done task to not be overdue")
 	}
 }
 
@@ -284,10 +285,9 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 // considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
 	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
+		ID:    4,
+		Title: "No due date task",
+		Done:  false,
 	}
 	now := time.Now()
 	if task.IsOverdue(now) {
@@ -297,7 +297,6 @@ func TestIsOverdue_NoDueDate(t *testing.T) {
 
 func TestListOverdueFilter(t *testing.T) {
 	mgr := newManager(t)
-
 	_ = mgr.Add("Overdue task", "high", "2000-01-01")
 	_ = mgr.Add("Future task", "low", "2099-12-31")
 	_ = mgr.Add("No due date", "medium", "")
@@ -515,7 +514,7 @@ func TestListValidPriorities(t *testing.T) {
 		filter string
 		want   int
 	}{
-		{"", 3},      // no filter — all tasks
+		{"", 3},     // no filter — all tasks
 		{"high", 1},
 		{"medium", 1},
 		{"low", 1},
@@ -530,5 +529,176 @@ func TestListValidPriorities(t *testing.T) {
 				t.Errorf("List(%q): expected %d tasks, got %d", tc.filter, tc.want, len(tasks))
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Clear tests
+// ---------------------------------------------------------------------------
+
+// TestClearEmptyStore verifies that Clear on an empty task list returns (0, nil).
+func TestClearEmptyStore(t *testing.T) {
+	mgr := newManager(t)
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear on empty store: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("Clear on empty store: expected 0 cleared, got %d", cleared)
+	}
+}
+
+// TestClearNoDoneTasks verifies that Clear returns (0, nil) when no tasks are
+// marked done and leaves all pending tasks intact.
+func TestClearNoDoneTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Pending A", "high", "")
+	_ = mgr.Add("Pending B", "low", "")
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear with no done tasks: unexpected error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("expected 0 cleared, got %d", cleared)
+	}
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks remaining, got %d", len(tasks))
+	}
+}
+
+// TestClearRemovesDoneTasks verifies that Clear removes all done tasks and
+// returns the correct count.
+func TestClearRemovesDoneTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task 1", "high", "")
+	_ = mgr.Add("Task 2", "low", "")
+	_ = mgr.Add("Task 3", "medium", "")
+
+	tasks, _ := mgr.List("", false)
+	// Mark tasks 1 and 3 as done.
+	_ = mgr.Complete(tasks[0].ID)
+	_ = mgr.Complete(tasks[2].ID)
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("expected 2 cleared, got %d", cleared)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 task remaining, got %d", len(remaining))
+	}
+	if remaining[0].Title != "Task 2" {
+		t.Errorf("expected remaining task title %q, got %q", "Task 2", remaining[0].Title)
+	}
+	if remaining[0].Done {
+		t.Error("expected remaining task to be pending (not done)")
+	}
+}
+
+// TestClearAllDoneTasks verifies that Clear removes all tasks when every task
+// is done and returns an empty list.
+func TestClearAllDoneTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Done A", "high", "")
+	_ = mgr.Add("Done B", "medium", "")
+
+	tasks, _ := mgr.List("", false)
+	for _, task := range tasks {
+		_ = mgr.Complete(task.ID)
+	}
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear all done: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("expected 2 cleared, got %d", cleared)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear all: unexpected error: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("expected 0 tasks remaining, got %d", len(remaining))
+	}
+}
+
+// TestClearLeavesPendingTasksIntact verifies that Clear only removes done tasks
+// and leaves all pending tasks with their original data unchanged.
+func TestClearLeavesPendingTasksIntact(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Keep me", "high", "2099-12-31")
+	_ = mgr.Add("Remove me", "low", "")
+	_ = mgr.Add("Also keep me", "medium", "")
+
+	tasks, _ := mgr.List("", false)
+	// Mark "Remove me" (index 1) as done.
+	_ = mgr.Complete(tasks[1].ID)
+
+	cleared, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 1 {
+		t.Errorf("expected 1 cleared, got %d", cleared)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("expected 2 remaining tasks, got %d", len(remaining))
+	}
+
+	// Verify titles and fields of surviving tasks are intact.
+	titles := map[string]bool{}
+	for _, t := range remaining {
+		titles[t.Title] = true
+		if t.Done {
+			t.Errorf("remaining task %q should not be done", t.Title)
+		}
+	}
+	if !titles["Keep me"] {
+		t.Error("expected 'Keep me' to remain after Clear")
+	}
+	if !titles["Also keep me"] {
+		t.Error("expected 'Also keep me' to remain after Clear")
+	}
+}
+
+// TestClearErrorOnUnreadableFile verifies that Clear propagates an error when
+// the backing file is unreadable (e.g., after permissions are revoked).
+func TestClearErrorOnUnreadableFile(t *testing.T) {
+	mgr := newManager(t)
+	// Add a task so the file is written.
+	if err := mgr.Add("A task", "medium", ""); err != nil {
+		t.Fatalf("Add: unexpected error: %v", err)
+	}
+
+	// Remove read permissions on the file so load() will fail.
+	if err := os.Chmod(mgr.filePath, 0000); err != nil {
+		t.Fatalf("Chmod: unexpected error: %v", err)
+	}
+	// Restore permissions after the test so the temp dir can be cleaned up.
+	t.Cleanup(func() { os.Chmod(mgr.filePath, 0600) }) //nolint:errcheck
+
+	_, err := mgr.Clear()
+	if err == nil {
+		t.Fatal("Clear on unreadable file: expected error, got nil")
 	}
 }
