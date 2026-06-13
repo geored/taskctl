@@ -241,7 +241,7 @@ func runStats(mgr *task.Manager) error {
 func runClear(mgr *task.Manager) error {
 	cleared, remaining, err := mgr.Clear()
 	if err != nil {
-		return fmt.Errorf("clear: %w", err)
+		return err
 	}
 	fmt.Printf("Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
 	return nil
