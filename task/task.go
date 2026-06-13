@@ -253,6 +253,34 @@ func (m *Manager) Delete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
+// Clear removes all tasks marked as done from the store.
+// It returns the number of cleared tasks, the number of remaining tasks, and
+// any error encountered. On error, no changes are written to disk.
+func (m *Manager) Clear() (cleared int, remaining int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, err := m.load()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	kept := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Done {
+			cleared++
+		} else {
+			kept = append(kept, t)
+		}
+	}
+
+	if err := m.save(kept); err != nil {
+		return 0, 0, err
+	}
+
+	return cleared, len(kept), nil
+}
+
 // Stats holds aggregate counts for the task list.
 type Stats struct {
 	Total     int

@@ -255,6 +255,90 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_EmptyStore verifies that runClear succeeds on an empty store
+// and prints "Cleared 0 completed tasks. 0 tasks remaining."
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runClear(mgr, []string{})
+	if err != nil {
+		t.Fatalf("runClear empty store: unexpected error: %v", err)
+	}
+}
+
+// TestRunClear_NoneCompleted verifies that runClear with only pending tasks
+// reports 0 cleared and the correct remaining count.
+func TestRunClear_NoneCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
+
+	err := runClear(mgr, []string{})
+	if err != nil {
+		t.Fatalf("runClear (none completed): unexpected error: %v", err)
+	}
+
+	// Verify tasks are still present.
+	tasks, _ := mgr.List("", false)
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks to remain, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_AllCompleted verifies that runClear removes all tasks when all
+// are marked done.
+func TestRunClear_AllCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task B"})
+
+	tasks, _ := mgr.List("", false)
+	for _, task := range tasks {
+		_ = mgr.Complete(task.ID)
+	}
+
+	err := runClear(mgr, []string{})
+	if err != nil {
+		t.Fatalf("runClear (all completed): unexpected error: %v", err)
+	}
+
+	tasks, _ = mgr.List("", false)
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks after clearing all completed, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_Mixed verifies that runClear removes only completed tasks and
+// leaves pending tasks intact.
+func TestRunClear_Mixed(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Keep me"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Clear me"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Keep me too"})
+
+	tasks, _ := mgr.List("", false)
+	// Mark the second task (index 1) as done.
+	_ = mgr.Complete(tasks[1].ID)
+
+	err := runClear(mgr, []string{})
+	if err != nil {
+		t.Fatalf("runClear (mixed): unexpected error: %v", err)
+	}
+
+	remaining, _ := mgr.List("", false)
+	if len(remaining) != 2 {
+		t.Errorf("expected 2 tasks remaining, got %d", len(remaining))
+	}
+	for _, task := range remaining {
+		if task.Done {
+			t.Errorf("task %d (%q) is done but should have been cleared", task.ID, task.Title)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
