@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -19,47 +20,90 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	if err := run(os.Args, os.Stdout); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+// run is the testable entry-point for the CLI. args is the full argument list
+// (including the program name at index 0). w receives any output that would
+// normally go to stdout.
+func run(args []string, w io.Writer) error {
+	if len(args) < 2 {
 		printUsage()
-		os.Exit(1)
+		return fmt.Errorf("no command specified")
 	}
 
-	mgr, err := task.NewManager("tasks.json")
+	// Support top-level --help / -h before any subcommand.
+	if args[1] == "--help" || args[1] == "-h" {
+		printUsage()
+		return nil
+	}
+
+	// Parse the top-level --file flag, which may appear before or after the
+	// subcommand. We do a quick pre-scan for --file / --file=<val> so that
+	// `taskctl --file x.json add ...` works as well as `taskctl add --file x.json ...`.
+	filePath := "tasks.json"
+	remaining := args[1:]
+	for i := 0; i < len(remaining); i++ {
+		a := remaining[i]
+		if a == "--file" || a == "-file" {
+			if i+1 < len(remaining) {
+				filePath = remaining[i+1]
+				remaining = append(remaining[:i], remaining[i+2:]...)
+				i--
+			}
+		} else if strings.HasPrefix(a, "--file=") {
+			filePath = strings.TrimPrefix(a, "--file=")
+			remaining = append(remaining[:i], remaining[i+1:]...)
+			i--
+		} else if strings.HasPrefix(a, "-file=") {
+			filePath = strings.TrimPrefix(a, "-file=")
+			remaining = append(remaining[:i], remaining[i+1:]...)
+			i--
+		}
+	}
+
+	if len(remaining) == 0 {
+		printUsage()
+		return fmt.Errorf("no command specified")
+	}
+
+	cmd := remaining[0]
+	cmdArgs := remaining[1:]
+
+	mgr, err := task.NewManager(filePath)
 	if err != nil {
-		log.Printf("failed to initialise task manager: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialise task manager: %w", err)
 	}
-	cmd := os.Args[1]
 
-	var runErr error
 	switch cmd {
 	case "add":
-		runErr = runAdd(mgr, os.Args[2:])
+		return runAdd(mgr, cmdArgs, w)
 	case "list":
-		runErr = runList(mgr, os.Args[2:])
+		return runList(mgr, cmdArgs, w)
 	case "done":
-		runErr = runDone(mgr, os.Args[2:])
+		return runDone(mgr, cmdArgs, w)
 	case "delete":
-		runErr = runDelete(mgr, os.Args[2:])
+		return runDelete(mgr, cmdArgs, w)
 	case "stats":
-		runErr = runStats(mgr)
+		return runStats(mgr, w)
 	case "clear":
-		runErr = runClear(mgr)
+		return runClear(mgr, w)
 	default:
-		log.Printf("unknown command: %s", cmd)
 		printUsage()
-		os.Exit(1)
-	}
-
-	if runErr != nil {
-		log.Printf("%v", runErr)
-		os.Exit(1)
+		return fmt.Errorf("unknown command: %s", cmd)
 	}
 }
 
 // printUsage writes a short help message to stderr.
 func printUsage() {
-	fmt.Fprintln(os.Stderr, `Usage: taskctl <command> [options]
+	fmt.Fprintln(os.Stderr, `Usage: taskctl [--file <path>] <command> [options]
+
+Global flags:
+  --file <path>   Path to the tasks JSON file (default: tasks.json)
+  --help, -h      Show this help message
 
 Commands:
   add     [--priority <low|medium|high>] [--due YYYY-MM-DD] <title>
@@ -74,7 +118,7 @@ Commands:
 // Flags: --priority (default "medium"), --due (optional, YYYY-MM-DD).
 // Remaining args after flag parsing are joined as the task title.
 // Returns an error instead of calling os.Exit, enabling unit testing.
-func runAdd(mgr *task.Manager, args []string) error {
+func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	priority := fs.String("priority", "medium", "Task priority: low, medium, high")
@@ -94,17 +138,24 @@ func runAdd(mgr *task.Manager, args []string) error {
 		return fmt.Errorf("add: task title must not be empty")
 	}
 
+	// Validate the --due flag value at the CLI boundary before calling the library.
+	if *due != "" {
+		if _, err := time.Parse("2006-01-02", *due); err != nil {
+			return fmt.Errorf("invalid --due value %q: expected format YYYY-MM-DD", *due)
+		}
+	}
+
 	if err := mgr.Add(title, *priority, *due); err != nil {
 		return fmt.Errorf("add: %w", err)
 	}
-	fmt.Println("Task added.")
+	fmt.Fprintln(w, "Task added.")
 	return nil
 }
 
 // runList handles the "list" sub-command.
 // Flags: --priority (filter by priority), --overdue (show only overdue tasks).
 // Returns an error instead of calling os.Exit, enabling unit testing.
-func runList(mgr *task.Manager, args []string) error {
+func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	priority := fs.String("priority", "", "Filter by priority: low, medium, high")
@@ -114,7 +165,6 @@ func runList(mgr *task.Manager, args []string) error {
 	}
 
 	// Validate the --priority flag value at the CLI boundary.
-	// (Library also validates, but this gives a cleaner CLI-level error message.)
 	if *priority != "" {
 		switch *priority {
 		case "low", "medium", "high":
@@ -130,15 +180,15 @@ func runList(mgr *task.Manager, args []string) error {
 	}
 
 	if len(tasks) == 0 {
-		fmt.Println("No tasks found.")
+		fmt.Fprintln(w, "No tasks found.")
 		return nil
 	}
 
 	now := time.Now()
 
 	// Header
-	fmt.Printf("%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
-	fmt.Println("------------------------------------------------------")
+	fmt.Fprintf(w, "%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
+	fmt.Fprintln(w, "------------------------------------------------------")
 
 	for _, t := range tasks {
 		done := "[ ]"
@@ -157,14 +207,14 @@ func runList(mgr *task.Manager, args []string) error {
 			title += " [OVERDUE]"
 		}
 
-		fmt.Printf("%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)
+		fmt.Fprintf(w, "%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)
 	}
 	return nil
 }
 
 // runDone handles the "done" sub-command.
 // Returns an error instead of calling os.Exit, enabling unit testing.
-func runDone(mgr *task.Manager, args []string) error {
+func runDone(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("done", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -181,13 +231,13 @@ func runDone(mgr *task.Manager, args []string) error {
 	if err := mgr.Complete(id); err != nil {
 		return fmt.Errorf("done: %w", err)
 	}
-	fmt.Printf("Task %d marked as done.\n", id)
+	fmt.Fprintf(w, "Task %d marked as done.\n", id)
 	return nil
 }
 
 // runDelete handles the "delete" sub-command.
 // Returns an error instead of calling os.Exit, enabling unit testing.
-func runDelete(mgr *task.Manager, args []string) error {
+func runDelete(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -204,7 +254,7 @@ func runDelete(mgr *task.Manager, args []string) error {
 	if err := mgr.Delete(id); err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	fmt.Printf("Task %d deleted.\n", id)
+	fmt.Fprintf(w, "Task %d deleted.\n", id)
 	return nil
 }
 
@@ -212,7 +262,7 @@ func runDelete(mgr *task.Manager, args []string) error {
 // It prints a summary that includes completion counts, overdue count,
 // per-priority task counts, and the overall completion rate.
 // Returns an error instead of calling os.Exit, enabling unit testing.
-func runStats(mgr *task.Manager) error {
+func runStats(mgr *task.Manager, w io.Writer) error {
 	s, err := mgr.Stats()
 	if err != nil {
 		return fmt.Errorf("stats: %w", err)
@@ -223,14 +273,14 @@ func runStats(mgr *task.Manager) error {
 		pct = s.Completed * 100 / s.Total
 	}
 
-	fmt.Printf("Total tasks:     %d\n", s.Total)
-	fmt.Printf("  Pending:       %d\n", s.Pending)
-	fmt.Printf("  Completed:     %d\n", s.Completed)
-	fmt.Printf("  Overdue:       %d\n", s.Overdue)
-	fmt.Printf("  High priority: %d\n", s.HighPriority)
-	fmt.Printf("  Med priority:  %d\n", s.MediumPriority)
-	fmt.Printf("  Low priority:  %d\n", s.LowPriority)
-	fmt.Printf("Completion rate: %d%%\n", pct)
+	fmt.Fprintf(w, "Total tasks:     %d\n", s.Total)
+	fmt.Fprintf(w, "  Pending:       %d\n", s.Pending)
+	fmt.Fprintf(w, "  Completed:     %d\n", s.Completed)
+	fmt.Fprintf(w, "  Overdue:       %d\n", s.Overdue)
+	fmt.Fprintf(w, "  High priority: %d\n", s.HighPriority)
+	fmt.Fprintf(w, "  Med priority:  %d\n", s.MediumPriority)
+	fmt.Fprintf(w, "  Low priority:  %d\n", s.LowPriority)
+	fmt.Fprintf(w, "Completion rate: %d%%\n", pct)
 	return nil
 }
 
@@ -238,11 +288,11 @@ func runStats(mgr *task.Manager) error {
 // It removes all tasks marked as done and prints how many were cleared and
 // how many tasks remain. Returns an error instead of calling os.Exit so that
 // the caller (main) controls the exit code and tests can capture errors.
-func runClear(mgr *task.Manager) error {
+func runClear(mgr *task.Manager, w io.Writer) error {
 	cleared, remaining, err := mgr.Clear()
 	if err != nil {
 		return fmt.Errorf("clear: %w", err)
 	}
-	fmt.Printf("Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
+	fmt.Fprintf(w, "Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
 	return nil
 }
