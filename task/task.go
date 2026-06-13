@@ -253,6 +253,35 @@ func (m *Manager) Delete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
+// Clear removes all tasks where Done == true from the persistent store.
+// It returns the count of tasks removed (cleared) and the count of tasks that
+// remain (remaining). The entire load-filter-save sequence is performed while
+// holding m.mu to prevent races.
+func (m *Manager) Clear() (cleared int, remaining int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, err := m.load()
+	if err != nil {
+		return 0, 0, fmt.Errorf("clear: %w", err)
+	}
+
+	kept := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Done {
+			cleared++
+		} else {
+			kept = append(kept, t)
+		}
+	}
+	remaining = len(kept)
+
+	if err := m.save(kept); err != nil {
+		return 0, 0, fmt.Errorf("clear: %w", err)
+	}
+	return cleared, remaining, nil
+}
+
 // Stats holds aggregate counts for the task list.
 type Stats struct {
 	Total     int

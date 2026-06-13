@@ -255,6 +255,64 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_NothingToRemove verifies that runClear returns no error when
+// no tasks are completed.
+func TestRunClear_NothingToRemove(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Pending task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Pending task B"})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear with no completed tasks: unexpected error: %v", err)
+	}
+
+	// Confirm pending tasks are still present.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks to remain after clearing nothing, got %d", len(tasks))
+	}
+}
+
+// TestRunClear_RemovesCompleted verifies that runClear removes completed tasks
+// and leaves only the pending ones.
+func TestRunClear_RemovesCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task to complete"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task to keep"})
+
+	// Mark first task as done.
+	tasks, _ := mgr.List("", false)
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+
+	err := runClear(mgr)
+	if err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	// Only the pending task should remain.
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 task remaining after runClear, got %d", len(remaining))
+	}
+	if remaining[0].Title != "Task to keep" {
+		t.Errorf("expected remaining task title %q, got %q", "Task to keep", remaining[0].Title)
+	}
+	if remaining[0].Done {
+		t.Error("remaining task should not be marked done")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
