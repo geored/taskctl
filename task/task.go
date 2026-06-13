@@ -44,19 +44,14 @@ func (t Task) IsOverdue(now time.Time) bool {
 // Manager handles persistence and business logic for the task list.
 // A mutex is embedded to serialise access when multiple goroutines (or, via
 // OS-level file locks, multiple processes) share the same Manager instance.
-//
-// TODO(#17): add OS-level file locking for multi-process safety.
 type Manager struct {
 	filePath string
-	mu       sync.Mutex // TODO(#17): add OS-level file locking for multi-process safety
+	mu       sync.Mutex
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
-// filePath is cleaned with filepath.Clean before use. Note that this does NOT
-// prevent callers from supplying traversal paths such as "../../etc/shadow";
-// it is the caller's responsibility to ensure filePath is within an expected
-// directory. In main.go the path is hardcoded, so no user-supplied input
-// reaches this function.
+// filePath is cleaned with filepath.Clean before use.
+// Returns an error if filePath starts with ".." (directory traversal).
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 	// Reject obvious traversal attempts: if the cleaned path starts with ".."
@@ -65,6 +60,15 @@ func NewManager(filePath string) (*Manager, error) {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
 	}
 	return &Manager{filePath: clean}, nil
+}
+
+// SetFilePath replaces the file path used by this Manager. It is intended for
+// use in tests only — it allows tests to corrupt the path after initial setup
+// so that subsequent saves will fail.
+func (m *Manager) SetFilePath(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.filePath = path
 }
 
 // load reads all tasks from disk. It returns an empty slice when the file does
@@ -253,6 +257,35 @@ func (m *Manager) Delete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
+// Clear removes all tasks marked as done (Done == true) from the task list.
+// It returns the number of tasks cleared and the number of tasks remaining.
+// The method holds m.mu for the entire load → filter → save cycle to prevent
+// concurrent modifications.
+func (m *Manager) Clear() (cleared int, remaining int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, loadErr := m.load()
+	if loadErr != nil {
+		return 0, 0, loadErr
+	}
+
+	pending := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if !t.Done {
+			pending = append(pending, t)
+		}
+	}
+
+	cleared = len(tasks) - len(pending)
+	remaining = len(pending)
+
+	if saveErr := m.save(pending); saveErr != nil {
+		return 0, 0, saveErr
+	}
+	return cleared, remaining, nil
+}
+
 // Stats holds aggregate counts for the task list.
 type Stats struct {
 	Total     int
@@ -268,13 +301,6 @@ type Stats struct {
 }
 
 // Stats computes summary statistics for all tasks in a single pass.
-// The completion percentage is safe to derive from the returned struct:
-//
-//	pct := 0
-//	if s.Total > 0 { pct = s.Completed * 100 / s.Total }
-//
-// Priority counts (HighPriority, MediumPriority, LowPriority) include both
-// pending and completed tasks so they always sum to Total.
 func (m *Manager) Stats() (Stats, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
