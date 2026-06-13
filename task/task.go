@@ -263,7 +263,7 @@ func (m *Manager) Clear() (cleared int, remaining int, err error) {
 
 	tasks, err := m.load()
 	if err != nil {
-		return 0, 0, fmt.Errorf("clear: %w", err)
+		return 0, 0, err
 	}
 
 	var done, notDone []Task
@@ -276,7 +276,7 @@ func (m *Manager) Clear() (cleared int, remaining int, err error) {
 	}
 
 	if err := m.save(notDone); err != nil {
-		return 0, 0, fmt.Errorf("clear: %w", err)
+		return 0, 0, err
 	}
 
 	return len(done), len(notDone), nil
