@@ -28,6 +28,8 @@ type Task struct {
 // IsOverdue reports whether the task is incomplete and its due date has passed
 // relative to the given reference time (typically time.Now()).
 // Tasks with no due date are never considered overdue.
+// The comparison is calendar-date based in the local timezone: a task due
+// today is not considered overdue until tomorrow, regardless of the time of day.
 func (t Task) IsOverdue(now time.Time) bool {
 	if t.Done || t.DueDate == "" {
 		return false
@@ -36,9 +38,17 @@ func (t Task) IsOverdue(now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	// Truncate both sides to date-only precision so that a task due today is
-	// not considered overdue until tomorrow.
-	return now.Truncate(24 * time.Hour).After(due)
+	// Compare calendar dates in the local timezone to avoid UTC-truncation
+	// artefacts that would cause false overdue results on non-UTC systems.
+	// Extract year/month/day from the local representation of now and due.
+	ny, nm, nd := now.In(time.Local).Date()
+	dy, dm, dd := due.In(time.Local).Date()
+
+	// Build midnight-local Date values for a clean calendar comparison.
+	nowDate := time.Date(ny, nm, nd, 0, 0, 0, 0, time.Local)
+	dueDate := time.Date(dy, dm, dd, 0, 0, 0, 0, time.Local)
+
+	return nowDate.After(dueDate)
 }
 
 // Manager handles persistence and business logic for the task list.
