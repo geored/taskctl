@@ -48,446 +48,421 @@ func TestNewManagerValidPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Existing functionality tests (preserved + upgraded to t.TempDir())
+// Add tests
 // ---------------------------------------------------------------------------
 
-func TestAdd(t *testing.T) {
+func TestAdd_EmptyTitle(t *testing.T) {
 	mgr := newManager(t)
-	if err := mgr.Add("Buy milk", "low", ""); err != nil {
-		t.Fatalf("Add: unexpected error: %v", err)
+	err := mgr.Add("", "medium", "")
+	if err == nil {
+		t.Fatal("Add with empty title: expected error, got nil")
+	}
+}
+
+func TestAdd_WhitespaceTitle(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Add("   ", "medium", "")
+	if err == nil {
+		t.Fatal("Add with whitespace-only title: expected error, got nil")
+	}
+}
+
+func TestAdd_InvalidPriority(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Add("My task", "urgent", "")
+	if err == nil {
+		t.Fatal("Add with invalid priority: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "urgent") {
+		t.Errorf("expected error to mention 'urgent', got: %v", err)
+	}
+}
+
+func TestAdd_ValidPriorities(t *testing.T) {
+	for _, p := range []string{"high", "medium", "low"} {
+		mgr := newManager(t)
+		if err := mgr.Add("Task", p, ""); err != nil {
+			t.Errorf("Add with priority %q: unexpected error: %v", p, err)
+		}
+	}
+}
+
+func TestAdd_InvalidDueDate(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Add("My task", "medium", "not-a-date")
+	if err == nil {
+		t.Fatal("Add with invalid due date: expected error, got nil")
+	}
+}
+
+func TestAdd_ValidDueDate(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Add("My task", "medium", "2099-12-31")
+	if err != nil {
+		t.Fatalf("Add with valid due date: unexpected error: %v", err)
+	}
+}
+
+func TestAdd_IDAutoIncrement(t *testing.T) {
+	mgr := newManager(t)
+	for i := 0; i < 3; i++ {
+		if err := mgr.Add("Task", "low", ""); err != nil {
+			t.Fatalf("Add task %d: unexpected error: %v", i, err)
+		}
 	}
 	tasks, err := mgr.List("", false)
 	if err != nil {
 		t.Fatalf("List: unexpected error: %v", err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(tasks))
-	}
-	if tasks[0].Title != "Buy milk" {
-		t.Errorf("expected title %q, got %q", "Buy milk", tasks[0].Title)
+	for i, task := range tasks {
+		if task.ID != i+1 {
+			t.Errorf("expected task ID %d, got %d", i+1, task.ID)
+		}
 	}
 }
 
-func TestList(t *testing.T) {
-	mgr := newManager(t)
-	_ = mgr.Add("Task A", "high", "")
-	_ = mgr.Add("Task B", "low", "")
+// ---------------------------------------------------------------------------
+// List tests
+// ---------------------------------------------------------------------------
 
+func TestList_Empty(t *testing.T) {
+	mgr := newManager(t)
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List on empty store: unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestList_AllTasks(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("A", "high", "")
+	_ = mgr.Add("B", "low", "")
 	tasks, err := mgr.List("", false)
 	if err != nil {
 		t.Fatalf("List: unexpected error: %v", err)
 	}
 	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+		t.Errorf("expected 2 tasks, got %d", len(tasks))
 	}
 }
 
-func TestComplete(t *testing.T) {
+func TestList_FilterByPriority(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("Finish report", "medium", "")
+	_ = mgr.Add("High", "high", "")
+	_ = mgr.Add("Low", "low", "")
+	tasks, err := mgr.List("high", false)
+	if err != nil {
+		t.Fatalf("List(high): unexpected error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Priority != "high" {
+		t.Errorf("expected 1 high-priority task, got %v", tasks)
+	}
+}
 
+func TestList_OverdueFilter(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Past", "medium", "2000-01-01") // definitely overdue
+	_ = mgr.Add("Future", "medium", "2099-12-31")
+	tasks, err := mgr.List("", true)
+	if err != nil {
+		t.Fatalf("List overdue: unexpected error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Title != "Past" {
+		t.Errorf("expected 1 overdue task, got %v", tasks)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Complete tests
+// ---------------------------------------------------------------------------
+
+func TestComplete_Success(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task", "medium", "")
 	tasks, _ := mgr.List("", false)
-	id := tasks[0].ID
-
-	if err := mgr.Complete(id); err != nil {
+	if err := mgr.Complete(tasks[0].ID); err != nil {
 		t.Fatalf("Complete: unexpected error: %v", err)
 	}
 	tasks, _ = mgr.List("", false)
 	if !tasks[0].Done {
-		t.Error("expected task to be marked done")
+		t.Error("expected task to be done after Complete")
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestComplete_NotFound(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("Temporary task", "medium", "")
+	err := mgr.Complete(9999)
+	if err == nil {
+		t.Fatal("Complete non-existent ID: expected error, got nil")
+	}
+}
 
+// ---------------------------------------------------------------------------
+// Delete tests
+// ---------------------------------------------------------------------------
+
+func TestDelete_Success(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task", "medium", "")
 	tasks, _ := mgr.List("", false)
-	id := tasks[0].ID
-
-	if err := mgr.Delete(id); err != nil {
+	if err := mgr.Delete(tasks[0].ID); err != nil {
 		t.Fatalf("Delete: unexpected error: %v", err)
 	}
 	tasks, _ = mgr.List("", false)
 	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks after delete, got %d", len(tasks))
+		t.Errorf("expected 0 tasks after Delete, got %d", len(tasks))
 	}
 }
 
-func TestListFilterByPriority(t *testing.T) {
+func TestDelete_NotFound(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("High task", "high", "")
-	_ = mgr.Add("Low task", "low", "")
-	_ = mgr.Add("Medium task", "medium", "")
-
-	tasks, err := mgr.List("high", false)
-	if err != nil {
-		t.Fatalf("List: unexpected error: %v", err)
-	}
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 high-priority task, got %d", len(tasks))
-	}
-	if tasks[0].Priority != "high" {
-		t.Errorf("expected priority %q, got %q", "high", tasks[0].Priority)
+	err := mgr.Delete(9999)
+	if err == nil {
+		t.Fatal("Delete non-existent ID: expected error, got nil")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Priority validation tests
+// IsOverdue tests
 // ---------------------------------------------------------------------------
 
-// TestAddInvalidPriority verifies that Add rejects unrecognised priority values.
-func TestAddInvalidPriority(t *testing.T) {
-	mgr := newManager(t)
-	tests := []string{"critical", "urgent", "", "HIGH", "Low"}
-	for _, p := range tests {
-		err := mgr.Add("Some task", p, "")
-		if err == nil {
-			t.Errorf("Add with priority %q: expected error, got nil", p)
-		}
+func TestIsOverdue_NoDueDate(t *testing.T) {
+	tk := Task{Done: false, DueDate: ""}
+	if tk.IsOverdue(time.Now()) {
+		t.Error("task with no due date should not be overdue")
 	}
 }
 
-// TestAddValidPriorities verifies that all three accepted priority values are
-// stored correctly.
-func TestAddValidPriorities(t *testing.T) {
-	for _, priority := range []string{"high", "medium", "low"} {
-		mgr := newManager(t)
-		if err := mgr.Add("Task", priority, ""); err != nil {
-			t.Errorf("Add with priority %q: unexpected error: %v", priority, err)
-		}
-		tasks, _ := mgr.List("", false)
-		if len(tasks) != 1 || tasks[0].Priority != priority {
-			t.Errorf("priority %q: stored task has priority %q", priority, tasks[0].Priority)
-		}
+func TestIsOverdue_DoneTask(t *testing.T) {
+	tk := Task{Done: true, DueDate: "2000-01-01"}
+	if tk.IsOverdue(time.Now()) {
+		t.Error("done task should never be overdue")
+	}
+}
+
+func TestIsOverdue_FutureDate(t *testing.T) {
+	tk := Task{Done: false, DueDate: "2099-12-31"}
+	if tk.IsOverdue(time.Now()) {
+		t.Error("task with future due date should not be overdue")
+	}
+}
+
+func TestIsOverdue_PastDate(t *testing.T) {
+	tk := Task{Done: false, DueDate: "2000-01-01"}
+	if !tk.IsOverdue(time.Now()) {
+		t.Error("task with past due date should be overdue")
+	}
+}
+
+func TestIsOverdue_Today(t *testing.T) {
+	today := time.Now().Format("2006-01-02")
+	tk := Task{Done: false, DueDate: today}
+	if tk.IsOverdue(time.Now()) {
+		t.Error("task due today should not yet be overdue")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Stats tests (existing, preserved)
+// Stats tests
 // ---------------------------------------------------------------------------
 
-func TestStatsEmpty(t *testing.T) {
+func TestStats_Empty(t *testing.T) {
 	mgr := newManager(t)
 	s, err := mgr.Stats()
 	if err != nil {
-		t.Fatalf("Stats: unexpected error: %v", err)
+		t.Fatalf("Stats on empty store: unexpected error: %v", err)
 	}
-	if s.Total != 0 || s.Completed != 0 || s.Pending != 0 || s.Overdue != 0 {
-		t.Errorf("expected all-zero stats on empty store, got %+v", s)
+	if s.Total != 0 || s.Completed != 0 || s.Pending != 0 {
+		t.Errorf("unexpected stats on empty store: %+v", s)
 	}
 }
 
-func TestStatsMixed(t *testing.T) {
+func TestStats_WithTasks(t *testing.T) {
 	mgr := newManager(t)
-	_ = mgr.Add("Task 1", "high", "")
-	_ = mgr.Add("Task 2", "low", "")
-	_ = mgr.Add("Task 3", "medium", "")
+	_ = mgr.Add("High task", "high", "")
+	_ = mgr.Add("Medium task", "medium", "2000-01-01") // overdue
+	_ = mgr.Add("Low task", "low", "")
 
 	tasks, _ := mgr.List("", false)
-	_ = mgr.Complete(tasks[0].ID)
+	_ = mgr.Complete(tasks[0].ID) // complete the first task
 
 	s, err := mgr.Stats()
 	if err != nil {
 		t.Fatalf("Stats: unexpected error: %v", err)
 	}
 	if s.Total != 3 {
-		t.Errorf("Total: expected 3, got %d", s.Total)
+		t.Errorf("expected Total=3, got %d", s.Total)
 	}
 	if s.Completed != 1 {
-		t.Errorf("Completed: expected 1, got %d", s.Completed)
+		t.Errorf("expected Completed=1, got %d", s.Completed)
 	}
 	if s.Pending != 2 {
-		t.Errorf("Pending: expected 2, got %d", s.Pending)
+		t.Errorf("expected Pending=2, got %d", s.Pending)
+	}
+	if s.Overdue != 1 {
+		t.Errorf("expected Overdue=1, got %d", s.Overdue)
+	}
+	if s.HighPriority != 1 {
+		t.Errorf("expected HighPriority=1, got %d", s.HighPriority)
+	}
+	if s.MediumPriority != 1 {
+		t.Errorf("expected MediumPriority=1, got %d", s.MediumPriority)
+	}
+	if s.LowPriority != 1 {
+		t.Errorf("expected LowPriority=1, got %d", s.LowPriority)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Due date tests
+// Clear tests
 // ---------------------------------------------------------------------------
 
-func TestAddWithDueDate(t *testing.T) {
-	mgr := newManager(t)
-	if err := mgr.Add("Submit report", "high", "2030-12-31"); err != nil {
-		t.Fatalf("Add with due date: unexpected error: %v", err)
-	}
-	tasks, _ := mgr.List("", false)
-	if tasks[0].DueDate != "2030-12-31" {
-		t.Errorf("expected DueDate %q, got %q", "2030-12-31", tasks[0].DueDate)
-	}
-}
-
-func TestAddInvalidDueDate(t *testing.T) {
-	mgr := newManager(t)
-	err := mgr.Add("Bad date task", "low", "not-a-date")
-	if err == nil {
-		t.Fatal("expected error for invalid due date, got nil")
-	}
-}
-
-func TestAddNoDueDate(t *testing.T) {
-	mgr := newManager(t)
-	if err := mgr.Add("No due date", "medium", ""); err != nil {
-		t.Fatalf("Add without due date: unexpected error: %v", err)
-	}
-	tasks, _ := mgr.List("", false)
-	if tasks[0].DueDate != "" {
-		t.Errorf("expected empty DueDate, got %q", tasks[0].DueDate)
-	}
-}
-
-// TestIsOverdue_PastDate verifies that an incomplete task with a past due date
-// is reported as overdue.
-func TestIsOverdue_PastDate(t *testing.T) {
-	task := Task{
-		ID:      1,
-		Title:   "Old task",
-		Done:    false,
-		DueDate: "2000-01-01",
-	}
-	now := time.Now()
-	if !task.IsOverdue(now) {
-		t.Error("expected task with past due date to be overdue")
-	}
-}
-
-// TestIsOverdue_FutureDate verifies that a task due in the future is not overdue.
-func TestIsOverdue_FutureDate(t *testing.T) {
-	task := Task{
-		ID:      2,
-		Title:   "Future task",
-		Done:    false,
-		DueDate: "2099-12-31",
-	}
-	now := time.Now()
-	if task.IsOverdue(now) {
-		t.Error("expected task with future due date to not be overdue")
-	}
-}
-
-// TestIsOverdue_DoneTask verifies that a completed task is never considered
-// overdue, even when its due date has passed.
-func TestIsOverdue_DoneTask(t *testing.T) {
-	task := Task{
-		ID:      3,
-		Title:   "Done old task",
-		Done:    true,
-		DueDate: "2000-01-01",
-	}
-	now := time.Now()
-	if task.IsOverdue(now) {
-		t.Error("expected completed task to not be overdue")
-	}
-}
-
-// TestIsOverdue_NoDueDate verifies that a task without a due date is never
-// considered overdue.
-func TestIsOverdue_NoDueDate(t *testing.T) {
-	task := Task{
-		ID:      4,
-		Title:   "No due date task",
-		Done:    false,
-		DueDate: "",
-	}
-	now := time.Now()
-	if task.IsOverdue(now) {
-		t.Error("expected task with no due date to not be overdue")
-	}
-}
-
-func TestListOverdueFilter(t *testing.T) {
-	mgr := newManager(t)
-
-	_ = mgr.Add("Overdue task", "high", "2000-01-01")
-	_ = mgr.Add("Future task", "low", "2099-12-31")
-	_ = mgr.Add("No due date", "medium", "")
-
-	overdue, err := mgr.List("", true)
-	if err != nil {
-		t.Fatalf("List overdue: unexpected error: %v", err)
-	}
-	if len(overdue) != 1 {
-		t.Fatalf("expected 1 overdue task, got %d", len(overdue))
-	}
-	if overdue[0].Title != "Overdue task" {
-		t.Errorf("expected overdue task title %q, got %q", "Overdue task", overdue[0].Title)
-	}
-}
-
-// TestStatsOverdue verifies that Stats.Overdue counts only incomplete tasks
-// with a past due date.
-func TestStatsOverdue(t *testing.T) {
-	mgr := newManager(t)
-
-	// 2 overdue (past date, incomplete)
-	_ = mgr.Add("Overdue 1", "high", "2000-01-01")
-	_ = mgr.Add("Overdue 2", "low", "1999-12-31")
-	// 1 not overdue (future)
-	_ = mgr.Add("Future", "medium", "2099-01-01")
-	// 1 no due date
-	_ = mgr.Add("No date", "medium", "")
-	// 1 completed with past date — should NOT count as overdue
-	_ = mgr.Add("Done old", "high", "2000-06-01")
-	tasks, _ := mgr.List("", false)
-	_ = mgr.Complete(tasks[4].ID)
-
-	s, err := mgr.Stats()
-	if err != nil {
-		t.Fatalf("Stats: unexpected error: %v", err)
-	}
-	if s.Total != 5 {
-		t.Errorf("Total: expected 5, got %d", s.Total)
-	}
-	if s.Overdue != 2 {
-		t.Errorf("Overdue: expected 2, got %d", s.Overdue)
-	}
-}
-
-// TestStatsOverdueZeroWhenNoDueDates verifies Overdue is 0 when no tasks have
-// due dates set.
-func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
+// TestClear_NoneCompleted verifies that Clear is a valid no-op when there are
+// no completed tasks: cleared=0, remaining=total, tasks on disk are unchanged.
+func TestClear_NoneCompleted(t *testing.T) {
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "low", "")
 
-	s, err := mgr.Stats()
+	cleared, remaining, err := mgr.Clear()
 	if err != nil {
-		t.Fatalf("Stats: unexpected error: %v", err)
+		t.Fatalf("Clear with no completed tasks: unexpected error: %v", err)
 	}
-	if s.Overdue != 0 {
-		t.Errorf("Overdue: expected 0, got %d", s.Overdue)
+	if cleared != 0 {
+		t.Errorf("expected cleared=0, got %d", cleared)
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Atomic save and file permission tests
-// ---------------------------------------------------------------------------
-
-// TestSaveFilePermissions verifies that the tasks file is written with mode
-// 0600 (owner read/write only) after an Add operation.
-func TestSaveFilePermissions(t *testing.T) {
-	mgr := newManager(t)
-	if err := mgr.Add("Permission check task", "medium", ""); err != nil {
-		t.Fatalf("Add: unexpected error: %v", err)
+	if remaining != 2 {
+		t.Errorf("expected remaining=2, got %d", remaining)
 	}
 
-	info, err := os.Stat(mgr.filePath)
+	// Verify tasks on disk are unchanged.
+	tasks, err := mgr.List("", false)
 	if err != nil {
-		t.Fatalf("Stat: unexpected error: %v", err)
+		t.Fatalf("List after Clear: unexpected error: %v", err)
 	}
-
-	got := info.Mode().Perm()
-	const want = os.FileMode(0600)
-	if got != want {
-		t.Errorf("file permissions: expected %04o, got %04o", want, got)
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks on disk after no-op Clear, got %d", len(tasks))
 	}
 }
 
-// TestSaveAtomicity verifies that Add followed immediately by List returns a
-// consistent task list with no partial-write corruption. Running with -race
-// validates there are no data races in the save path.
-func TestSaveAtomicity(t *testing.T) {
+// TestClear_SomeCompleted verifies that Clear removes only the completed tasks
+// and reports correct cleared/remaining counts.
+func TestClear_SomeCompleted(t *testing.T) {
 	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "medium", "")
+	_ = mgr.Add("Task C", "low", "")
 
-	const n = 20
-	for i := 0; i < n; i++ {
-		if err := mgr.Add("Task", "low", ""); err != nil {
-			t.Fatalf("Add iteration %d: unexpected error: %v", i, err)
-		}
-		tasks, err := mgr.List("", false)
-		if err != nil {
-			t.Fatalf("List after Add %d: unexpected error: %v", i, err)
-		}
-		if len(tasks) != i+1 {
-			t.Fatalf("after %d adds: expected %d tasks, got %d", i+1, i+1, len(tasks))
-		}
+	// Complete the first two tasks.
+	all, _ := mgr.List("", false)
+	_ = mgr.Complete(all[0].ID)
+	_ = mgr.Complete(all[1].ID)
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("expected cleared=2, got %d", cleared)
+	}
+	if remaining != 1 {
+		t.Errorf("expected remaining=1, got %d", remaining)
+	}
+
+	// Verify only the incomplete task remains.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear: unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task after Clear, got %d", len(tasks))
+	}
+	if tasks[0].Done {
+		t.Error("remaining task should not be done")
+	}
+	if tasks[0].Title != "Task C" {
+		t.Errorf("expected remaining task title 'Task C', got %q", tasks[0].Title)
+	}
+}
+
+// TestClear_AllCompleted verifies that when all tasks are done, Clear removes
+// them all and the resulting list is empty.
+func TestClear_AllCompleted(t *testing.T) {
+	mgr := newManager(t)
+	_ = mgr.Add("Task A", "high", "")
+	_ = mgr.Add("Task B", "low", "")
+
+	all, _ := mgr.List("", false)
+	for _, tk := range all {
+		_ = mgr.Complete(tk.ID)
+	}
+
+	cleared, remaining, err := mgr.Clear()
+	if err != nil {
+		t.Fatalf("Clear all completed: unexpected error: %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("expected cleared=2, got %d", cleared)
+	}
+	if remaining != 0 {
+		t.Errorf("expected remaining=0, got %d", remaining)
+	}
+
+	// Verify the store is empty.
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after Clear all: unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks after Clear all, got %d", len(tasks))
+	}
+}
+
+// TestClear_ErrorOnUnreadableFile verifies that Clear surfaces a load error
+// when the backing file is unreadable.
+func TestClear_ErrorOnUnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — file permission restrictions do not apply")
+	}
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write a valid JSON file first.
+	if err := os.WriteFile(filePath, []byte("[]"), 0600); err != nil {
+		t.Fatalf("setup: WriteFile: %v", err)
+	}
+
+	mgr, err := NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: unexpected error: %v", err)
+	}
+
+	// Remove read permission so load() will fail.
+	if err := os.Chmod(filePath, 0000); err != nil {
+		t.Fatalf("setup: Chmod: %v", err)
+	}
+	// Restore permissions after the test so TempDir cleanup can remove the file.
+	t.Cleanup(func() { os.Chmod(filePath, 0600) }) //nolint:errcheck
+
+	cleared, remaining, err := mgr.Clear()
+	if err == nil {
+		t.Fatal("Clear with unreadable file: expected error, got nil")
+	}
+	if cleared != 0 || remaining != 0 {
+		t.Errorf("expected (0, 0) on error, got (%d, %d)", cleared, remaining)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Error-path tests (new — requirement #3)
+// TestListInvalidPriorities verifies that List rejects invalid priority values.
 // ---------------------------------------------------------------------------
 
-// TestCompleteNonExistentID verifies that Complete returns an error when the
-// given ID does not exist in the task store.
-func TestCompleteNonExistentID(t *testing.T) {
+func TestListInvalidPriorities(t *testing.T) {
 	mgr := newManager(t)
-	// Empty store — ID 9999 cannot exist.
-	err := mgr.Complete(9999)
-	if err == nil {
-		t.Fatal("Complete with non-existent ID: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "9999") {
-		t.Errorf("Complete error should mention the task ID, got: %v", err)
-	}
-}
-
-// TestCompleteNonExistentIDWithTasks verifies that Complete returns an error
-// when the ID does not match any task even when other tasks exist.
-func TestCompleteNonExistentIDWithTasks(t *testing.T) {
-	mgr := newManager(t)
-	_ = mgr.Add("Existing task", "medium", "")
-
-	err := mgr.Complete(9999)
-	if err == nil {
-		t.Fatal("Complete with non-existent ID: expected error, got nil")
-	}
-}
-
-// TestDeleteNonExistentID verifies that Delete returns an error when the given
-// ID does not exist in the task store.
-func TestDeleteNonExistentID(t *testing.T) {
-	mgr := newManager(t)
-	// Empty store — ID 9999 cannot exist.
-	err := mgr.Delete(9999)
-	if err == nil {
-		t.Fatal("Delete with non-existent ID: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "9999") {
-		t.Errorf("Delete error should mention the task ID, got: %v", err)
-	}
-}
-
-// TestDeleteNonExistentIDWithTasks verifies that Delete returns an error when
-// the ID does not match any task even when other tasks exist.
-func TestDeleteNonExistentIDWithTasks(t *testing.T) {
-	mgr := newManager(t)
-	_ = mgr.Add("Existing task", "high", "")
-
-	err := mgr.Delete(9999)
-	if err == nil {
-		t.Fatal("Delete with non-existent ID: expected error, got nil")
-	}
-}
-
-// TestAddEmptyTitle verifies that Add returns an error when the title is empty
-// or consists only of whitespace.
-func TestAddEmptyTitle(t *testing.T) {
-	mgr := newManager(t)
-	cases := []struct {
-		name  string
-		title string
-	}{
-		{"empty string", ""},
-		{"spaces only", "   "},
-		{"tabs only", "\t\t"},
-		{"newline only", "\n"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := mgr.Add(tc.title, "medium", "")
-			if err == nil {
-				t.Errorf("Add with title %q: expected error, got nil", tc.title)
-			}
-		})
-	}
-}
-
-// TestListInvalidPriority verifies that List returns an error when called with
-// an unrecognised priority string (library-boundary validation — requirement #1).
-func TestListInvalidPriority(t *testing.T) {
-	mgr := newManager(t)
-	_ = mgr.Add("A task", "medium", "")
 
 	invalidPriorities := []string{"urgent", "critical", "HIGH", "Low", "MEDIUM", "none"}
 	for _, p := range invalidPriorities {

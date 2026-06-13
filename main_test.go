@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +20,29 @@ func newTestManager(t *testing.T) *task.Manager {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
 	return mgr
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns the
+// captured output as a string.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = orig
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy: %v", err)
+	}
+	return buf.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +278,115 @@ func TestRunStats_WithTasks(t *testing.T) {
 	err := runStats(mgr)
 	if err != nil {
 		t.Fatalf("runStats with tasks: unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_HappyPath verifies that runClear prints the expected message
+// and returns nil when there are completed tasks to remove.
+func TestRunClear_HappyPath(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task C"})
+
+	// Mark two tasks as done.
+	all, _ := mgr.List("", false)
+	_ = runDone(mgr, []string{intStr(all[0].ID)})
+	_ = runDone(mgr, []string{intStr(all[1].ID)})
+
+	out := captureStdout(t, func() {
+		err := runClear(mgr, []string{})
+		if err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 2 completed tasks. 1 tasks remaining.\n"
+	if out != want {
+		t.Errorf("runClear output mismatch:\n  got:  %q\n  want: %q", out, want)
+	}
+}
+
+// TestRunClear_NoCompletedTasks verifies the no-op case: no tasks are done,
+// so cleared=0 and remaining=total.
+func TestRunClear_NoCompletedTasks(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
+
+	out := captureStdout(t, func() {
+		err := runClear(mgr, []string{})
+		if err != nil {
+			t.Errorf("runClear no-op: unexpected error: %v", err)
+		}
+	})
+
+	want := "Cleared 0 completed tasks. 2 tasks remaining.\n"
+	if out != want {
+		t.Errorf("runClear no-op output mismatch:\n  got:  %q\n  want: %q", out, want)
+	}
+}
+
+// TestRunClear_PropagatesError verifies that runClear wraps and returns errors
+// from mgr.Clear() with the "clear: " prefix.
+func TestRunClear_PropagatesError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — file permission restrictions do not apply")
+	}
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "tasks.json")
+
+	// Write a valid file, then lock it.
+	if err := os.WriteFile(filePath, []byte("[]"), 0600); err != nil {
+		t.Fatalf("setup WriteFile: %v", err)
+	}
+
+	mgr, err := task.NewManager(filePath)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	// Make the file unreadable.
+	if err := os.Chmod(filePath, 0000); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(filePath, 0600) }) //nolint:errcheck
+
+	err = runClear(mgr, []string{})
+	if err == nil {
+		t.Fatal("runClear with unreadable file: expected error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "clear:") {
+		t.Errorf("expected error to start with 'clear:', got: %v", err)
+	}
+}
+
+// TestRunClear_AllDone verifies the output when every task is completed.
+func TestRunClear_AllDone(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
+
+	all, _ := mgr.List("", false)
+	for _, tk := range all {
+		_ = runDone(mgr, []string{intStr(tk.ID)})
+	}
+
+	out := captureStdout(t, func() {
+		err := runClear(mgr, []string{})
+		if err != nil {
+			t.Errorf("runClear all-done: unexpected error: %v", err)
+		}
+	})
+
+	want := fmt.Sprintf("Cleared %d completed tasks. %d tasks remaining.\n", 2, 0)
+	if out != want {
+		t.Errorf("runClear all-done output mismatch:\n  got:  %q\n  want: %q", out, want)
 	}
 }
 
