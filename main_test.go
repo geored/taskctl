@@ -255,6 +255,73 @@ func TestRunStats_WithTasks(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runClear tests
+// ---------------------------------------------------------------------------
+
+// TestRunClear_Success adds tasks, completes some, then calls runClear and
+// expects no error. The cleared tasks should be gone afterwards.
+func TestRunClear_Success(t *testing.T) {
+	mgr := newTestManager(t)
+
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task 2"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task 3"})
+
+	tasks, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	// Complete tasks 1 and 3.
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+	_ = runDone(mgr, []string{intStr(tasks[2].ID)})
+
+	if err := runClear(mgr); err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Errorf("expected 1 task remaining, got %d", len(remaining))
+	}
+	if remaining[0].Done {
+		t.Errorf("remaining task should not be done")
+	}
+}
+
+// TestRunClear_EmptyStore calls runClear with no tasks and expects no error.
+func TestRunClear_EmptyStore(t *testing.T) {
+	mgr := newTestManager(t)
+	if err := runClear(mgr); err != nil {
+		t.Fatalf("runClear on empty store: unexpected error: %v", err)
+	}
+}
+
+// TestRunClear_NoneCompleted adds tasks, completes none, then calls runClear.
+// Expects no error and all tasks still present.
+func TestRunClear_NoneCompleted(t *testing.T) {
+	mgr := newTestManager(t)
+
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task B"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task C"})
+
+	if err := runClear(mgr); err != nil {
+		t.Fatalf("runClear: unexpected error: %v", err)
+	}
+
+	remaining, err := mgr.List("", false)
+	if err != nil {
+		t.Fatalf("List after runClear: unexpected error: %v", err)
+	}
+	if len(remaining) != 3 {
+		t.Errorf("expected 3 tasks remaining (none were completed), got %d", len(remaining))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helper
 // ---------------------------------------------------------------------------
 
