@@ -28,6 +28,12 @@ type Task struct {
 // IsOverdue reports whether the task is incomplete and its due date has passed
 // relative to the given reference time (typically time.Now()).
 // Tasks with no due date are never considered overdue.
+//
+// Note: both the reference time and the parsed due date are compared in UTC.
+// time.Truncate operates in UTC, and time.Parse returns a UTC time, so the
+// comparison is internally consistent. A task due "today" in UTC is not
+// considered overdue until the following UTC day. Users in negative UTC offsets
+// may observe a task as overdue while it is still their local calendar day.
 func (t Task) IsOverdue(now time.Time) bool {
 	if t.Done || t.DueDate == "" {
 		return false
@@ -36,8 +42,8 @@ func (t Task) IsOverdue(now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	// Truncate both sides to date-only precision so that a task due today is
-	// not considered overdue until tomorrow.
+	// Truncate both sides to date-only precision (UTC) so that a task due
+	// today is not considered overdue until tomorrow.
 	return now.Truncate(24 * time.Hour).After(due)
 }
 
@@ -50,11 +56,8 @@ type Manager struct {
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
-// filePath is cleaned with filepath.Clean before use. Note that this does NOT
-// prevent callers from supplying traversal paths such as "../../etc/shadow";
-// it is the caller's responsibility to ensure filePath is within an expected
-// directory. In main.go the path is hardcoded, so no user-supplied input
-// reaches this function.
+// filePath is cleaned with filepath.Clean before use. Paths that start with
+// ".." (after cleaning) are rejected to prevent directory traversal attacks.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 	// Reject obvious traversal attempts: if the cleaned path starts with ".."

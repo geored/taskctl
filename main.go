@@ -154,14 +154,20 @@ func runList(mgr *task.Manager, args []string) {
 }
 
 // runDone handles the "done" sub-command.
+// Uses flag.FlagSet for consistent argument parsing (req #15).
 func runDone(mgr *task.Manager, args []string) {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("done", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		log.Printf("done: %v", err)
+		os.Exit(1)
+	}
+	if fs.NArg() == 0 {
 		log.Print("done: task ID is required")
 		os.Exit(1)
 	}
-	id, err := strconv.Atoi(args[0])
+	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		log.Printf("done: invalid task ID: %s", args[0])
+		log.Printf("done: invalid task ID: %s", fs.Arg(0))
 		os.Exit(1)
 	}
 	if err := mgr.Complete(id); err != nil {
@@ -172,14 +178,20 @@ func runDone(mgr *task.Manager, args []string) {
 }
 
 // runDelete handles the "delete" sub-command.
+// Uses flag.FlagSet for consistent argument parsing (req #15).
 func runDelete(mgr *task.Manager, args []string) {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("delete", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		log.Printf("delete: %v", err)
+		os.Exit(1)
+	}
+	if fs.NArg() == 0 {
 		log.Print("delete: task ID is required")
 		os.Exit(1)
 	}
-	id, err := strconv.Atoi(args[0])
+	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		log.Printf("delete: invalid task ID: %s", args[0])
+		log.Printf("delete: invalid task ID: %s", fs.Arg(0))
 		os.Exit(1)
 	}
 	if err := mgr.Delete(id); err != nil {
