@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -147,7 +148,7 @@ func TestRunDone_Success(t *testing.T) {
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDone(mgr, []string{intStr(id)})
+	err := runDone(mgr, []string{strconv.Itoa(id)})
 	if err != nil {
 		t.Fatalf("runDone: unexpected error: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestRunDelete_Success(t *testing.T) {
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDelete(mgr, []string{intStr(id)})
+	err := runDelete(mgr, []string{strconv.Itoa(id)})
 	if err != nil {
 		t.Fatalf("runDelete: unexpected error: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestRunStats_WithTasks(t *testing.T) {
 	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"})
 
 	tasks, _ := mgr.List("", false)
-	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+	_ = runDone(mgr, []string{strconv.Itoa(tasks[0].ID)})
 
 	err := runStats(mgr)
 	if err != nil {
@@ -289,7 +290,7 @@ func TestRunClear_RemovesCompleted(t *testing.T) {
 
 	// Mark first task as done.
 	tasks, _ := mgr.List("", false)
-	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
+	_ = runDone(mgr, []string{strconv.Itoa(tasks[0].ID)})
 
 	err := runClear(mgr)
 	if err != nil {
@@ -310,33 +311,4 @@ func TestRunClear_RemovesCompleted(t *testing.T) {
 	if remaining[0].Done {
 		t.Error("remaining task should not be marked done")
 	}
-}
-
-// ---------------------------------------------------------------------------
-// helper
-// ---------------------------------------------------------------------------
-
-// intStr converts an int to its string representation — avoids importing strconv
-// in the test file directly.
-func intStr(n int) string {
-	return strings.TrimSpace(strings.ReplaceAll(strings.Repeat("x", n), "x", "")[0:0]) + itoa(n)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if neg {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
 }
