@@ -79,7 +79,7 @@ func (m *Manager) load() ([]Task, error) {
 	}
 	var tasks []Task
 	if err := json.Unmarshal(data, &tasks); err != nil {
-		return nil, fmt.Errorf("load: unmarshal: %w", err)
+		return nil, fmt.Errorf("failed to parse task file %q (file may be corrupted — inspect or delete it to recover): %w", m.filePath, err)
 	}
 	return tasks, nil
 }
@@ -192,7 +192,7 @@ func isValidPriority(p string) bool {
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	// Validate priority at the library boundary — consistent with Add().
 	if !isValidPriority(priority) {
-		return nil, fmt.Errorf("invalid priority %q: must be low, medium, high, or empty string", priority)
+		return nil, fmt.Errorf("invalid priority filter: %q; must be one of: low, medium, high", priority)
 	}
 
 	m.mu.Lock()
@@ -218,7 +218,12 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 }
 
 // Complete marks the task with the given ID as done.
+// Returns an error if id is not a positive integer.
 func (m *Manager) Complete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid task ID: %d; IDs start at 1", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -236,7 +241,12 @@ func (m *Manager) Complete(id int) error {
 }
 
 // Delete removes the task with the given ID.
+// Returns an error if id is not a positive integer.
 func (m *Manager) Delete(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid task ID: %d; IDs start at 1", id)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
