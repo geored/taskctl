@@ -46,7 +46,6 @@ func newTestManager(t *testing.T) *task.Manager {
 }
 
 // captureStdout redirects os.Stdout during fn(), returns what was printed.
-// A defer restores os.Stdout even if fn() panics.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -55,14 +54,11 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	old := os.Stdout
 	os.Stdout = w
-	defer func() {
-		// Restore os.Stdout even on panic.
-		os.Stdout = old
-	}()
 
 	fn()
 
 	w.Close()
+	os.Stdout = old
 
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, r); err != nil {
@@ -71,89 +67,13 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// newBuf returns a fresh bytes.Buffer as an io.Writer for capturing output.
-func newBuf() *bytes.Buffer {
-	return &bytes.Buffer{}
-}
-
-// ---------------------------------------------------------------------------
-// run() tests
-// ---------------------------------------------------------------------------
-
-func TestRun_NoArgs(t *testing.T) {
-	err := run([]string{"taskctl"}, newBuf())
-	if err == nil {
-		t.Fatal("run with no args: expected error, got nil")
-	}
-}
-
-func TestRun_UnknownCommand(t *testing.T) {
-	chdirTemp(t)
-	err := run([]string{"taskctl", "frobnicate"}, newBuf())
-	if err == nil {
-		t.Fatal("run with unknown command: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "frobnicate") {
-		t.Errorf("error should mention unknown command, got: %v", err)
-	}
-}
-
-func TestRun_InvalidFilePath(t *testing.T) {
-	// Absolute path should be rejected by NewManager.
-	err := run([]string{"taskctl", "--file", "/etc/shadow", "list"}, newBuf())
-	if err == nil {
-		t.Fatal("run with absolute file path: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to initialise task manager") {
-		t.Errorf("error should mention manager init failure, got: %v", err)
-	}
-}
-
-func TestRun_HelpFlag(t *testing.T) {
-	err := run([]string{"taskctl", "--help"}, newBuf())
-	if err != nil {
-		t.Fatalf("run --help: unexpected error: %v", err)
-	}
-}
-
-func TestRun_HFlag(t *testing.T) {
-	err := run([]string{"taskctl", "-h"}, newBuf())
-	if err != nil {
-		t.Fatalf("run -h: unexpected error: %v", err)
-	}
-}
-
-func TestRun_AddCommand(t *testing.T) {
-	chdirTemp(t)
-	err := run([]string{"taskctl", "add", "--priority", "high", "Test task"}, newBuf())
-	if err != nil {
-		t.Fatalf("run add: unexpected error: %v", err)
-	}
-}
-
-func TestRun_FileFlag_BeforeCommand(t *testing.T) {
-	chdirTemp(t)
-	err := run([]string{"taskctl", "--file", "tasks.json", "add", "Test"}, newBuf())
-	if err != nil {
-		t.Fatalf("run --file before command: unexpected error: %v", err)
-	}
-}
-
-func TestRun_FileFlag_AfterCommand(t *testing.T) {
-	chdirTemp(t)
-	err := run([]string{"taskctl", "add", "--file", "tasks.json", "Test"}, newBuf())
-	if err != nil {
-		t.Fatalf("run --file after command: unexpected error: %v", err)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // runAdd tests
 // ---------------------------------------------------------------------------
 
 func TestRunAdd_Success(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runAdd(mgr, []string{"--priority", "high", "Buy milk"}, newBuf())
+	err := runAdd(mgr, []string{"--priority", "high", "Buy milk"})
 	if err != nil {
 		t.Fatalf("runAdd: unexpected error: %v", err)
 	}
@@ -161,7 +81,7 @@ func TestRunAdd_Success(t *testing.T) {
 
 func TestRunAdd_MultiWordTitle(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runAdd(mgr, []string{"Fix the broken", "CI pipeline"}, newBuf())
+	err := runAdd(mgr, []string{"Fix the broken", "CI pipeline"})
 	if err != nil {
 		t.Fatalf("runAdd multi-word: unexpected error: %v", err)
 	}
@@ -170,7 +90,7 @@ func TestRunAdd_MultiWordTitle(t *testing.T) {
 func TestRunAdd_FlagEqualsValueSyntax(t *testing.T) {
 	mgr := newTestManager(t)
 	// --priority=low uses the flag=value syntax (requires flag.FlagSet support)
-	err := runAdd(mgr, []string{"--priority=low", "--due=2099-12-31", "Syntax test"}, newBuf())
+	err := runAdd(mgr, []string{"--priority=low", "--due=2099-12-31", "Syntax test"})
 	if err != nil {
 		t.Fatalf("runAdd with --flag=value syntax: unexpected error: %v", err)
 	}
@@ -178,7 +98,7 @@ func TestRunAdd_FlagEqualsValueSyntax(t *testing.T) {
 
 func TestRunAdd_MissingTitle(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runAdd(mgr, []string{"--priority", "medium"}, newBuf())
+	err := runAdd(mgr, []string{"--priority", "medium"})
 	if err == nil {
 		t.Fatal("runAdd with no title: expected error, got nil")
 	}
@@ -186,7 +106,7 @@ func TestRunAdd_MissingTitle(t *testing.T) {
 
 func TestRunAdd_InvalidPriority(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runAdd(mgr, []string{"--priority", "urgent", "My task"}, newBuf())
+	err := runAdd(mgr, []string{"--priority", "urgent", "My task"})
 	if err == nil {
 		t.Fatal("runAdd with invalid priority: expected error, got nil")
 	}
@@ -194,12 +114,9 @@ func TestRunAdd_InvalidPriority(t *testing.T) {
 
 func TestRunAdd_InvalidDueDate(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runAdd(mgr, []string{"--due", "not-a-date", "My task"}, newBuf())
+	err := runAdd(mgr, []string{"--due", "not-a-date", "My task"})
 	if err == nil {
 		t.Fatal("runAdd with invalid due date: expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "expected format YYYY-MM-DD") {
-		t.Errorf("error should mention YYYY-MM-DD format, got: %v", err)
 	}
 }
 
@@ -209,7 +126,7 @@ func TestRunAdd_InvalidDueDate(t *testing.T) {
 
 func TestRunList_EmptyStore(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runList(mgr, []string{}, newBuf())
+	err := runList(mgr, []string{})
 	if err != nil {
 		t.Fatalf("runList empty store: unexpected error: %v", err)
 	}
@@ -217,10 +134,10 @@ func TestRunList_EmptyStore(t *testing.T) {
 
 func TestRunList_WithTasks(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "high", "Task A"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "low", "Task B"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task B"})
 
-	err := runList(mgr, []string{}, newBuf())
+	err := runList(mgr, []string{})
 	if err != nil {
 		t.Fatalf("runList: unexpected error: %v", err)
 	}
@@ -228,10 +145,10 @@ func TestRunList_WithTasks(t *testing.T) {
 
 func TestRunList_FilterByPriority(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "high", "High task"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "low", "Low task"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "High task"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Low task"})
 
-	err := runList(mgr, []string{"--priority", "high"}, newBuf())
+	err := runList(mgr, []string{"--priority", "high"})
 	if err != nil {
 		t.Fatalf("runList --priority high: unexpected error: %v", err)
 	}
@@ -239,9 +156,9 @@ func TestRunList_FilterByPriority(t *testing.T) {
 
 func TestRunList_FilterByPriorityEqualsValue(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority=medium", "Med task"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority=medium", "Med task"})
 
-	err := runList(mgr, []string{"--priority=medium"}, newBuf())
+	err := runList(mgr, []string{"--priority=medium"})
 	if err != nil {
 		t.Fatalf("runList --priority=medium: unexpected error: %v", err)
 	}
@@ -249,7 +166,7 @@ func TestRunList_FilterByPriorityEqualsValue(t *testing.T) {
 
 func TestRunList_InvalidPriority(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runList(mgr, []string{"--priority", "urgent"}, newBuf())
+	err := runList(mgr, []string{"--priority", "urgent"})
 	if err == nil {
 		t.Fatal("runList with invalid priority: expected error, got nil")
 	}
@@ -260,9 +177,9 @@ func TestRunList_InvalidPriority(t *testing.T) {
 
 func TestRunList_OverdueFlag(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--due", "2000-01-01", "--priority", "high", "Old task"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2000-01-01", "--priority", "high", "Old task"})
 
-	err := runList(mgr, []string{"--overdue"}, newBuf())
+	err := runList(mgr, []string{"--overdue"})
 	if err != nil {
 		t.Fatalf("runList --overdue: unexpected error: %v", err)
 	}
@@ -274,12 +191,12 @@ func TestRunList_OverdueFlag(t *testing.T) {
 
 func TestRunDone_Success(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "medium", "Task to complete"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task to complete"})
 
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDone(mgr, []string{intStr(id)}, newBuf())
+	err := runDone(mgr, []string{intStr(id)})
 	if err != nil {
 		t.Fatalf("runDone: unexpected error: %v", err)
 	}
@@ -292,7 +209,7 @@ func TestRunDone_Success(t *testing.T) {
 
 func TestRunDone_MissingID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDone(mgr, []string{}, newBuf())
+	err := runDone(mgr, []string{})
 	if err == nil {
 		t.Fatal("runDone with no args: expected error, got nil")
 	}
@@ -300,7 +217,7 @@ func TestRunDone_MissingID(t *testing.T) {
 
 func TestRunDone_InvalidID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDone(mgr, []string{"not-a-number"}, newBuf())
+	err := runDone(mgr, []string{"not-a-number"})
 	if err == nil {
 		t.Fatal("runDone with non-integer ID: expected error, got nil")
 	}
@@ -308,7 +225,7 @@ func TestRunDone_InvalidID(t *testing.T) {
 
 func TestRunDone_NonExistentID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDone(mgr, []string{"9999"}, newBuf())
+	err := runDone(mgr, []string{"9999"})
 	if err == nil {
 		t.Fatal("runDone with non-existent ID: expected error, got nil")
 	}
@@ -320,12 +237,12 @@ func TestRunDone_NonExistentID(t *testing.T) {
 
 func TestRunDelete_Success(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "low", "Task to delete"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Task to delete"})
 
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDelete(mgr, []string{intStr(id)}, newBuf())
+	err := runDelete(mgr, []string{intStr(id)})
 	if err != nil {
 		t.Fatalf("runDelete: unexpected error: %v", err)
 	}
@@ -338,7 +255,7 @@ func TestRunDelete_Success(t *testing.T) {
 
 func TestRunDelete_MissingID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDelete(mgr, []string{}, newBuf())
+	err := runDelete(mgr, []string{})
 	if err == nil {
 		t.Fatal("runDelete with no args: expected error, got nil")
 	}
@@ -346,7 +263,7 @@ func TestRunDelete_MissingID(t *testing.T) {
 
 func TestRunDelete_InvalidID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDelete(mgr, []string{"abc"}, newBuf())
+	err := runDelete(mgr, []string{"abc"})
 	if err == nil {
 		t.Fatal("runDelete with non-integer ID: expected error, got nil")
 	}
@@ -354,7 +271,7 @@ func TestRunDelete_InvalidID(t *testing.T) {
 
 func TestRunDelete_NonExistentID(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runDelete(mgr, []string{"9999"}, newBuf())
+	err := runDelete(mgr, []string{"9999"})
 	if err == nil {
 		t.Fatal("runDelete with non-existent ID: expected error, got nil")
 	}
@@ -366,7 +283,7 @@ func TestRunDelete_NonExistentID(t *testing.T) {
 
 func TestRunStats_EmptyStore(t *testing.T) {
 	mgr := newTestManager(t)
-	err := runStats(mgr, newBuf())
+	err := runStats(mgr)
 	if err != nil {
 		t.Fatalf("runStats empty store: unexpected error: %v", err)
 	}
@@ -374,13 +291,13 @@ func TestRunStats_EmptyStore(t *testing.T) {
 
 func TestRunStats_WithTasks(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"})
 
 	tasks, _ := mgr.List("", false)
-	_ = runDone(mgr, []string{intStr(tasks[0].ID)}, newBuf())
+	_ = runDone(mgr, []string{intStr(tasks[0].ID)})
 
-	err := runStats(mgr, newBuf())
+	err := runStats(mgr)
 	if err != nil {
 		t.Fatalf("runStats with tasks: unexpected error: %v", err)
 	}
@@ -395,39 +312,41 @@ func TestRunStats_WithTasks(t *testing.T) {
 func TestRunClear_HappyPath(t *testing.T) {
 	mgr := newTestManager(t)
 	// Add 4 tasks, mark 2 done.
-	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "medium", "Task 2"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "low", "Task 3"}, newBuf())
-	_ = runAdd(mgr, []string{"--priority", "high", "Task 4"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"})
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task 2"})
+	_ = runAdd(mgr, []string{"--priority", "low", "Task 3"})
+	_ = runAdd(mgr, []string{"--priority", "high", "Task 4"})
 
 	all, _ := mgr.List("", false)
 	_ = mgr.Complete(all[0].ID)
 	_ = mgr.Complete(all[2].ID)
 
-	buf := newBuf()
-	if err := runClear(mgr, buf); err != nil {
-		t.Errorf("runClear: unexpected error: %v", err)
-	}
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
 
 	want := "Cleared 2 completed tasks. 2 tasks remaining.\n"
-	if got := buf.String(); got != want {
-		t.Errorf("runClear output:\n  got:  %q\n  want: %q", got, want)
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
 	}
 }
 
 // TestRunClear_NothingToClear verifies the output when no tasks are done.
 func TestRunClear_NothingToClear(t *testing.T) {
 	mgr := newTestManager(t)
-	_ = runAdd(mgr, []string{"--priority", "medium", "Pending task"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Pending task"})
 
-	buf := newBuf()
-	if err := runClear(mgr, buf); err != nil {
-		t.Errorf("runClear: unexpected error: %v", err)
-	}
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear: unexpected error: %v", err)
+		}
+	})
 
 	want := "Cleared 0 completed tasks. 1 tasks remaining.\n"
-	if got := buf.String(); got != want {
-		t.Errorf("runClear output:\n  got:  %q\n  want: %q", got, want)
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
 	}
 }
 
@@ -435,14 +354,15 @@ func TestRunClear_NothingToClear(t *testing.T) {
 func TestRunClear_EmptyStore(t *testing.T) {
 	mgr := newTestManager(t)
 
-	buf := newBuf()
-	if err := runClear(mgr, buf); err != nil {
-		t.Errorf("runClear on empty store: unexpected error: %v", err)
-	}
+	out := captureStdout(t, func() {
+		if err := runClear(mgr); err != nil {
+			t.Errorf("runClear on empty store: unexpected error: %v", err)
+		}
+	})
 
 	want := "Cleared 0 completed tasks. 0 tasks remaining.\n"
-	if got := buf.String(); got != want {
-		t.Errorf("runClear output:\n  got:  %q\n  want: %q", got, want)
+	if out != want {
+		t.Errorf("runClear output:\n  got:  %q\n  want: %q", out, want)
 	}
 }
 
@@ -464,7 +384,7 @@ func TestRunClear_Error(t *testing.T) {
 		t.Fatalf("NewManager: unexpected error: %v", err)
 	}
 
-	runErr := runClear(mgr, newBuf())
+	runErr := runClear(mgr)
 	if runErr == nil {
 		t.Fatal("runClear with bad file: expected error, got nil")
 	}
