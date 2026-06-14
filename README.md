@@ -20,6 +20,8 @@
   - [done](#done)
   - [delete](#delete)
   - [stats](#stats)
+  - [clear](#clear)
+  - [version](#version)
 - [Examples](#examples)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -43,6 +45,8 @@
 | ✅ **Complete tasks** | Mark a task as done by its ID |
 | 🗑️ **Delete tasks** | Remove a task permanently by its ID |
 | 📊 **Task statistics** | View total, pending, completed, overdue counts and completion rate with `stats` |
+| 🧹 **Clear completed** | Remove all completed tasks at once with `clear` |
+| 🔖 **Version info** | Print the current version string with `version` |
 | 📅 **Due dates** | Attach an optional due date (YYYY-MM-DD) to any task with `--due` |
 | ⚠️ **Overdue detection** | Tasks past their due date are flagged `[OVERDUE]`; filter with `--overdue` |
 
@@ -259,6 +263,42 @@ Completion rate: 41%
 - **Overdue** = incomplete tasks whose due date has passed.
 - **Completion rate** is an integer percentage: `(completed / total) * 100`. It is `0%` when there are no tasks.
 - Priority counts (`High priority`, `Med priority`, `Low priority`) include both pending and completed tasks so they always sum to the total.
+
+---
+
+### `clear`
+
+Remove all completed (done) tasks from the task list in one step.
+
+```
+taskctl clear
+```
+
+No flags are accepted.
+
+**Example output:**
+
+```
+Cleared 3 completed tasks. 4 tasks remaining.
+```
+
+---
+
+### `version`
+
+Print the current version string of the installed `taskctl` binary.
+
+```
+taskctl version
+```
+
+Also available as `taskctl --version` or `taskctl -version`.
+
+**Example output:**
+
+```
+taskctl version dev
+```
 
 ---
 
