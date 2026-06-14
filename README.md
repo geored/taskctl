@@ -15,6 +15,7 @@
   - [From Source](#from-source)
   - [Docker](#docker)
 - [CLI Reference](#cli-reference)
+  - [Global Flags](#global-flags)
   - [add](#add)
   - [list](#list)
   - [done](#done)
@@ -104,6 +105,42 @@ docker run --rm taskctl list --priority high
 ---
 
 ## CLI Reference
+
+### Global Flags
+
+These flags apply to the entire `taskctl` command and may be placed **anywhere** on the command line — either before or after the subcommand.
+
+```
+taskctl [--file <path>] <command> [options]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--file <path>` | `tasks.json` | Path to the JSON file used to store tasks |
+
+**Notes:**
+
+- The default storage file is `tasks.json` in the current working directory.
+- The flag accepts any relative or absolute path up to 4096 characters. Paths containing `..` (directory traversal) are rejected.
+- Both `--file <path>` and `--file=<path>` syntax are supported.
+- The flag may appear **before** the subcommand or **after** it — both positions are equivalent:
+
+```bash
+# --file before the subcommand
+taskctl --file ~/work/tasks.json list
+
+# --file after the subcommand (also valid)
+taskctl list --file ~/work/tasks.json
+
+# --file using = syntax
+taskctl --file=~/work/tasks.json add "My task"
+
+# Use a project-specific task file
+taskctl --file project-alpha.json add "Review PR" --priority high
+taskctl --file project-alpha.json list
+```
+
+---
 
 ### `add`
 
