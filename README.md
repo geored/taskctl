@@ -15,6 +15,7 @@
   - [From Source](#from-source)
   - [Docker](#docker)
 - [CLI Reference](#cli-reference)
+  - [Global Flags](#global-flags)
   - [add](#add)
   - [list](#list)
   - [done](#done)
@@ -106,6 +107,18 @@ docker run --rm taskctl list --priority high
 ---
 
 ## CLI Reference
+
+```
+taskctl [--file <path>] <command> [options]
+```
+
+### Global Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--file <path>` | `tasks.json` | Path to the tasks JSON file. Can appear before or after the subcommand. |
+| `--version` | — | Print the version string and exit. |
+| `--help`, `-h` | — | Show the help message. |
 
 ### `add`
 
@@ -290,7 +303,22 @@ Cleared 3 completed tasks. 4 tasks remaining.
 
 ## Examples
 
-A full end-to-end workflow:
+### Using `--file` to specify an alternate tasks file
+
+The `--file` flag can appear **before or after** the subcommand:
+
+```bash
+# Use a dedicated work task file (flag before subcommand)
+taskctl --file work.json add "Team meeting notes" --priority high
+
+# Flag after the subcommand — equally valid
+taskctl add --file work.json "Team meeting notes" --priority high
+
+# List tasks from a project-specific file
+taskctl --file project-alpha.json list --priority high
+```
+
+### Full end-to-end workflow
 
 ```bash
 # 1. Add some tasks
