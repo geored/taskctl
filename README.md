@@ -79,32 +79,29 @@ taskctl --help
 
 A `Dockerfile` is included for containerised usage.
 
+> **⚠️ Warning:** Each `docker run --rm` invocation starts a **fresh, isolated container**. Any tasks written in one run are lost when that container is removed. To persist data across multiple runs, you **must** mount a local directory into the container with `-v $(pwd)/data:/data`. All examples below include this flag — omit it only if you intentionally want a throwaway session.
+
 ```bash
 # Build the Docker image
 docker build -t taskctl .
 
-# Run taskctl inside a container
+# Run taskctl inside a container (stateless — no data is written)
 docker run --rm taskctl --help
 
-# Add a task
-docker run --rm taskctl add "Review pull requests" --priority high
+# Add a task (data written to ./data/tasks.json on your host)
+docker run --rm -v $(pwd)/data:/data taskctl add "Review pull requests" --priority high
 
 # Add a task with a due date
-docker run --rm taskctl add "Submit report" --priority high --due 2025-12-31
+docker run --rm -v $(pwd)/data:/data taskctl add "Submit report" --priority high --due 2025-12-31
 
 # List all tasks
-docker run --rm taskctl list
+docker run --rm -v $(pwd)/data:/data taskctl list
 
 # Filter by priority
-docker run --rm taskctl list --priority high
+docker run --rm -v $(pwd)/data:/data taskctl list --priority high
 ```
 
 > **Note:** The Docker image is built on `scratch` and contains no timezone database. All time comparisons (e.g., `IsOverdue`, `stats`) run in **UTC**. Setting the `TZ` environment variable has no effect inside the container.
-
-> **Tip:** Mount a local volume if you want tasks to persist between container runs:
-> ```bash
-> docker run --rm -v $(pwd)/data:/data taskctl list
-> ```
 
 ---
 
@@ -437,11 +434,11 @@ taskctl/
 ```go
 // Task represents a single to-do item.
 type Task struct {
-    ID       int    `json:"id"`
-    Title    string `json:"title"`
-    Done     bool   `json:"done"`
-    Priority string `json:"priority"`
-    DueDate  string `json:"due_date,omitempty"`
+    ID       int    \`json:"id"\`
+    Title    string \`json:"title"\`
+    Done     bool   \`json:"done"\`
+    Priority string \`json:"priority"\`
+    DueDate  string \`json:"due_date,omitempty"\`
 }
 ```
 
