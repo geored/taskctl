@@ -500,3 +500,179 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// --file flag placement and edge-case tests (Fixes #31)
+// ---------------------------------------------------------------------------
+
+// TestRun_FileFlag_EqualsSign_BeforeCommand verifies that --file=<path>
+// (equals-sign syntax) before the subcommand is parsed correctly.
+func TestRun_FileFlag_EqualsSign_BeforeCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "--file=work.json", "add", "EqBefore"}, newBuf())
+	if err != nil {
+		t.Fatalf("--file=work.json before subcommand: unexpected error: %v", err)
+	}
+}
+
+// TestRun_FileFlag_EqualsSign_AfterCommand verifies that --file=<path>
+// (equals-sign syntax) after the subcommand is parsed correctly.
+func TestRun_FileFlag_EqualsSign_AfterCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "add", "--file=work.json", "EqAfter"}, newBuf())
+	if err != nil {
+		t.Fatalf("--file=work.json after subcommand: unexpected error: %v", err)
+	}
+}
+
+// TestRun_FileFlag_SingleDash_BeforeCommand verifies that -file <path>
+// (single-dash space-separated) before the subcommand is accepted.
+func TestRun_FileFlag_SingleDash_BeforeCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "-file", "work.json", "add", "SingleDash"}, newBuf())
+	if err != nil {
+		t.Fatalf("-file work.json before subcommand: unexpected error: %v", err)
+	}
+}
+
+// TestRun_FileFlag_SingleDashEquals_BeforeCommand verifies that -file=<path>
+// (single-dash equals-sign) before the subcommand is parsed correctly.
+func TestRun_FileFlag_SingleDashEquals_BeforeCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "-file=work.json", "add", "SingleDashEq"}, newBuf())
+	if err != nil {
+		t.Fatalf("-file=work.json before subcommand: unexpected error: %v", err)
+	}
+}
+
+// TestRun_FileFlag_CorrectFileUsed verifies that the file named by --file is
+// actually used for storage — a round-trip test: write to custom file via
+// flag-before-subcommand, read it back via flag-after-subcommand, confirm the
+// default tasks.json was never created.
+func TestRun_FileFlag_CorrectFileUsed(t *testing.T) {
+	chdirTemp(t)
+
+	// Add a task to custom.json using --file before the subcommand.
+	if err := run([]string{"taskctl", "--file", "custom.json", "add", "Custom file task"}, newBuf()); err != nil {
+		t.Fatalf("add to custom.json: %v", err)
+	}
+
+	// List from custom.json using --file after the subcommand.
+	buf := newBuf()
+	if err := run([]string{"taskctl", "list", "--file", "custom.json"}, buf); err != nil {
+		t.Fatalf("list from custom.json: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Custom file task") {
+		t.Errorf("expected 'Custom file task' in output, got: %s", buf.String())
+	}
+
+	// Verify the default tasks.json was NOT created.
+	if _, err := os.Stat("tasks.json"); err == nil {
+		t.Error("tasks.json should not exist when --file custom.json was used throughout")
+	}
+}
+
+// TestRun_FileFlag_EqualsSign_CorrectFileUsed verifies the equals-sign syntax
+// also routes to the correct custom file (round-trip).
+func TestRun_FileFlag_EqualsSign_CorrectFileUsed(t *testing.T) {
+	chdirTemp(t)
+
+	if err := run([]string{"taskctl", "--file=eq.json", "add", "EqSyntax task"}, newBuf()); err != nil {
+		t.Fatalf("add to eq.json: %v", err)
+	}
+
+	buf := newBuf()
+	if err := run([]string{"taskctl", "--file=eq.json", "list"}, buf); err != nil {
+		t.Fatalf("list from eq.json: %v", err)
+	}
+	if !strings.Contains(buf.String(), "EqSyntax task") {
+		t.Errorf("expected 'EqSyntax task' in output, got: %s", buf.String())
+	}
+}
+
+// TestRun_FileFlag_PathTooLong verifies that a --file value exceeding 4096
+// characters is rejected before NewManager is called (Fixes #76 / Issue #31).
+func TestRun_FileFlag_PathTooLong(t *testing.T) {
+	longPath := strings.Repeat("a", maxFilePathLen+1)
+	err := run([]string{"taskctl", "--file", longPath, "list"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error for file path > maxFilePathLen, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum length") {
+		t.Errorf("error should mention 'exceeds maximum length', got: %v", err)
+	}
+}
+
+// TestRun_FileFlag_PathExactlyMaxLen verifies that a --file value of exactly
+// maxFilePathLen characters is not rejected by the length check itself.
+// (NewManager may still reject it for other reasons; we only test the length gate.)
+func TestRun_FileFlag_PathExactlyMaxLen(t *testing.T) {
+	// Use a path that is exactly maxFilePathLen chars. It will fail at
+	// NewManager (path too long for OS), but NOT with "exceeds maximum length".
+	exactPath := strings.Repeat("a", maxFilePathLen)
+	err := run([]string{"taskctl", "--file", exactPath, "list"}, newBuf())
+	if err != nil && strings.Contains(err.Error(), "exceeds maximum length") {
+		t.Errorf("a %d-char path should NOT trigger the length gate, got: %v", maxFilePathLen, err)
+	}
+}
+
+// TestRun_FileFlag_TraversalRejected verifies that a --file path containing
+// directory traversal ("..") is rejected. The rejection is delegated to
+// NewManager (single authoritative layer, per design).
+func TestRun_FileFlag_TraversalRejected(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "--file", "../sibling.json", "list"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error for traversal path '../sibling.json', got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to initialise task manager") {
+		t.Errorf("traversal error should be wrapped with 'failed to initialise task manager', got: %v", err)
+	}
+}
+
+// TestRun_FileFlag_AbsolutePathRejected ensures the existing absolute-path
+// rejection (delegated to NewManager) is exercised through the full run() path
+// including the pre-scan loop (complements TestRun_InvalidFilePath).
+func TestRun_FileFlag_AbsolutePathRejected(t *testing.T) {
+	err := run([]string{"taskctl", "--file", "/tmp/evil.json", "list"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error for absolute --file path, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to initialise task manager") {
+		t.Errorf("error should wrap manager init failure, got: %v", err)
+	}
+}
+
+// TestRun_FileFlag_MissingValue verifies that `--file` with no following value
+// (i.e. it is the last argument before the subcommand in a way that the
+// subcommand name gets consumed as the filename) produces an error.
+// This exercises the edge case where args[i+1] is the subcommand name.
+func TestRun_FileFlag_MissingValue(t *testing.T) {
+	chdirTemp(t)
+	// "--file" is last; no value follows → no subcommand left → error.
+	err := run([]string{"taskctl", "--file"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error when --file has no value argument, got nil")
+	}
+}
+
+// TestRun_FileFlag_BeforeAndAfterConsistent verifies that placing --file
+// before vs after the subcommand produces the same observable result:
+// both writes end up in the same file and reads return the same data.
+func TestRun_FileFlag_BeforeAndAfterConsistent(t *testing.T) {
+	chdirTemp(t)
+
+	// Write using --file BEFORE subcommand.
+	if err := run([]string{"taskctl", "--file", "shared.json", "add", "Shared task"}, newBuf()); err != nil {
+		t.Fatalf("add (flag before): %v", err)
+	}
+
+	// Read using --file AFTER subcommand — should see the same task.
+	buf := newBuf()
+	if err := run([]string{"taskctl", "list", "--file", "shared.json"}, buf); err != nil {
+		t.Fatalf("list (flag after): %v", err)
+	}
+	if !strings.Contains(buf.String(), "Shared task") {
+		t.Errorf("flag-before and flag-after do not share storage: output=%s", buf.String())
+	}
+}
