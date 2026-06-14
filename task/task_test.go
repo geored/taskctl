@@ -884,3 +884,241 @@ func TestClear_NoOpWhenNoneDone(t *testing.T) {
 			mtimeBefore, infoAfter.ModTime())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// load() post-deserialization validation tests (Fixes #80)
+// ---------------------------------------------------------------------------
+
+// writeRawTasks is a helper that JSON-encodes tasks and writes them directly
+// to the Manager's backing file, bypassing Add() validation. This lets tests
+// inject records that violate the invariants that Add() enforces.
+func writeRawTasks(t *testing.T, mgr *Manager, tasks []Task) {
+	t.Helper()
+	data, err := json.MarshalIndent(tasks, "", "  ")
+	if err != nil {
+		t.Fatalf("writeRawTasks: json.MarshalIndent: %v", err)
+	}
+	if err := os.WriteFile(mgr.filePath, data, 0600); err != nil {
+		t.Fatalf("writeRawTasks: os.WriteFile: %v", err)
+	}
+}
+
+// TestLoad_InvalidID_Zero verifies that load() rejects a record whose ID is 0.
+// Fixes #80 (check 1: ID must be > 0).
+func TestLoad_InvalidID_Zero(t *testing.T) {
+	mgr := newManager(t)
+	writeRawTasks(t, mgr, []Task{
+		{ID: 0, Title: "Zero ID task", Priority: "low"},
+	})
+	_, err := mgr.load()
+	if err == nil {
+		t.Fatal("load: expected error for ID=0, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid id") {
+		t.Errorf("load error should mention 'invalid id', got: %v", err)
+	}
+}
+
+// TestLoad_InvalidID_Negative verifies that load() rejects a record whose ID
+// is negative.
+// Fixes #80 (check 1: ID must be > 0).
+func TestLoad_InvalidID_Negative(t *testing.T) {
+	mgr := newManager(t)
+	writeRawTasks(t, mgr, []Task{
+		{ID: -5, Title: "Negative ID task", Priority: "medium"},
+	})
+	_, err := mgr.load()
+	if err == nil {
+		t.Fatal("load: expected error for negative ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid id") {
+		t.Errorf("load error should mention 'invalid id', got: %v", err)
+	}
+}
+
+// TestLoad_EmptyTitle verifies that load() rejects a record with an empty
+// or whitespace-only title.
+// Fixes #80 (check 2: title must not be blank).
+func TestLoad_EmptyTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+	}{
+		{"empty string", ""},
+		{"spaces only", "   "},
+		{"tab only", "\t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newManager(t)
+			writeRawTasks(t, mgr, []Task{
+				{ID: 1, Title: tc.title, Priority: "low"},
+			})
+			_, err := mgr.load()
+			if err == nil {
+				t.Fatalf("load: expected error for blank title %q, got nil", tc.title)
+			}
+			if !strings.Contains(err.Error(), "empty title") {
+				t.Errorf("load error should mention 'empty title', got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_UnknownPriority verifies that load() rejects a record with a
+// priority value that is not one of "high", "medium", or "low".
+// Fixes #80 (check 3: priority must be a known value).
+func TestLoad_UnknownPriority(t *testing.T) {
+	cases := []string{"urgent", "critical", "HIGH", "Low", "none", ""}
+	for _, p := range cases {
+		t.Run("priority="+p, func(t *testing.T) {
+			mgr := newManager(t)
+			writeRawTasks(t, mgr, []Task{
+				{ID: 1, Title: "Some task", Priority: p},
+			})
+			_, err := mgr.load()
+			if err == nil {
+				t.Fatalf("load: expected error for unknown priority %q, got nil", p)
+			}
+			if !strings.Contains(err.Error(), "unknown priority") {
+				t.Errorf("load error should mention 'unknown priority', got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_MalformedDueDate verifies that load() rejects a record whose
+// DueDate is a non-empty string that is not in YYYY-MM-DD format.
+// Fixes #80 (check 4: due_date must be empty or YYYY-MM-DD).
+func TestLoad_MalformedDueDate(t *testing.T) {
+	cases := []string{
+		"not-a-date",
+		"31-12-2024",   // DD-MM-YYYY
+		"2024/12/31",   // wrong separator
+		"2024-13-01",   // month out of range
+		"2024-00-01",   // month zero
+		"yesterday",
+	}
+	for _, d := range cases {
+		t.Run("due_date="+d, func(t *testing.T) {
+			mgr := newManager(t)
+			writeRawTasks(t, mgr, []Task{
+				{ID: 1, Title: "Dated task", Priority: "low", DueDate: d},
+			})
+			_, err := mgr.load()
+			if err == nil {
+				t.Fatalf("load: expected error for malformed due_date %q, got nil", d)
+			}
+			if !strings.Contains(err.Error(), "malformed due_date") {
+				t.Errorf("load error should mention 'malformed due_date', got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_DuplicateIDs verifies that load() rejects a file containing two or
+// more records that share the same ID.
+// Fixes #80 (check 5: IDs must be unique).
+func TestLoad_DuplicateIDs(t *testing.T) {
+	mgr := newManager(t)
+	writeRawTasks(t, mgr, []Task{
+		{ID: 1, Title: "First task", Priority: "high"},
+		{ID: 2, Title: "Second task", Priority: "medium"},
+		{ID: 1, Title: "Duplicate task", Priority: "low"}, // duplicate of record 0
+	})
+	_, err := mgr.load()
+	if err == nil {
+		t.Fatal("load: expected error for duplicate IDs, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("load error should mention 'duplicate', got: %v", err)
+	}
+}
+
+// TestLoad_ValidFile verifies that a well-formed tasks.json is loaded without
+// error, ensuring the validation loop does not break the happy path.
+// Fixes #80 (regression guard).
+func TestLoad_ValidFile(t *testing.T) {
+	mgr := newManager(t)
+	writeRawTasks(t, mgr, []Task{
+		{ID: 1, Title: "Alpha", Priority: "high", DueDate: "2099-06-01"},
+		{ID: 2, Title: "Beta", Priority: "medium"},
+		{ID: 3, Title: "Gamma", Priority: "low", Done: true},
+	})
+	tasks, err := mgr.load()
+	if err != nil {
+		t.Fatalf("load: unexpected error for valid file: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Errorf("load: expected 3 tasks, got %d", len(tasks))
+	}
+}
+
+// TestLoad_EmptyFile verifies that an empty task list (non-existent file) is
+// not an error and returns an empty slice.
+// Fixes #80 (edge case: empty store is valid).
+func TestLoad_EmptyFile(t *testing.T) {
+	mgr := newManager(t)
+	// No file written — Manager file does not exist yet.
+	tasks, err := mgr.load()
+	if err != nil {
+		t.Fatalf("load: unexpected error for missing file: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("load: expected 0 tasks for missing file, got %d", len(tasks))
+	}
+}
+
+// TestLoad_ValidationErrorsPropagateToCaller verifies that invalid data in
+// tasks.json causes all public Manager methods (Add, List, Complete, Delete,
+// Clear, Stats) to return a non-nil error, since they all call load().
+// Fixes #80 (callers automatically benefit from load() validation).
+func TestLoad_ValidationErrorsPropagateToCaller(t *testing.T) {
+	mgr := newManager(t)
+	// Inject a record with an invalid (zero) ID.
+	writeRawTasks(t, mgr, []Task{
+		{ID: 0, Title: "Bad record", Priority: "low"},
+	})
+
+	t.Run("List propagates error", func(t *testing.T) {
+		_, err := mgr.List("", false)
+		if err == nil {
+			t.Error("List: expected error from corrupted store, got nil")
+		}
+	})
+
+	t.Run("Add propagates error", func(t *testing.T) {
+		err := mgr.Add("New task", "low", "")
+		if err == nil {
+			t.Error("Add: expected error from corrupted store, got nil")
+		}
+	})
+
+	t.Run("Complete propagates error", func(t *testing.T) {
+		err := mgr.Complete(1)
+		if err == nil {
+			t.Error("Complete: expected error from corrupted store, got nil")
+		}
+	})
+
+	t.Run("Delete propagates error", func(t *testing.T) {
+		err := mgr.Delete(1)
+		if err == nil {
+			t.Error("Delete: expected error from corrupted store, got nil")
+		}
+	})
+
+	t.Run("Clear propagates error", func(t *testing.T) {
+		_, _, err := mgr.Clear()
+		if err == nil {
+			t.Error("Clear: expected error from corrupted store, got nil")
+		}
+	})
+
+	t.Run("Stats propagates error", func(t *testing.T) {
+		_, err := mgr.Stats()
+		if err == nil {
+			t.Error("Stats: expected error from corrupted store, got nil")
+		}
+	})
+}
