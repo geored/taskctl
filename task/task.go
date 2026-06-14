@@ -95,7 +95,10 @@ func NewManager(filePath string) (*Manager, error) {
 
 // load reads all tasks from disk. It returns an empty slice when the file does
 // not yet exist. Callers must hold m.mu before calling load.
+//
 // Fixes #30: JSON parse errors now include the file path.
+// Fixes #80: Post-deserialization validation rejects records with invalid IDs,
+// empty titles, unknown priorities, malformed due dates, or duplicate IDs.
 func (m *Manager) load() ([]Task, error) {
 	data, err := os.ReadFile(m.filePath)
 	if err != nil {
@@ -108,6 +111,40 @@ func (m *Manager) load() ([]Task, error) {
 	if err := json.Unmarshal(data, &tasks); err != nil {
 		return nil, fmt.Errorf("failed to parse task file %s: %w", m.filePath, err)
 	}
+
+	// Post-deserialization validation: reject any file whose records violate
+	// the invariants that Add() enforces so that a hand-crafted or externally
+	// modified tasks.json cannot corrupt application state. Fixes #80.
+	seenIDs := make(map[int]struct{}, len(tasks))
+	for i, t := range tasks {
+		// 1. ID must be a positive integer.
+		if t.ID <= 0 {
+			return nil, fmt.Errorf("load: record %d has invalid id %d: must be a positive integer", i, t.ID)
+		}
+		// 2. Title must be non-empty.
+		if strings.TrimSpace(t.Title) == "" {
+			return nil, fmt.Errorf("load: record %d (id %d) has empty title", i, t.ID)
+		}
+		// 3. Priority must be one of the accepted values.
+		switch t.Priority {
+		case "high", "medium", "low":
+			// valid
+		default:
+			return nil, fmt.Errorf("load: record %d (id %d) has unknown priority %q: must be high, medium, or low", i, t.ID, t.Priority)
+		}
+		// 4. DueDate must be empty or in YYYY-MM-DD format.
+		if t.DueDate != "" {
+			if _, err := time.Parse(dateLayout, t.DueDate); err != nil {
+				return nil, fmt.Errorf("load: record %d (id %d) has malformed due_date %q: expected YYYY-MM-DD", i, t.ID, t.DueDate)
+			}
+		}
+		// 5. No duplicate IDs.
+		if _, dup := seenIDs[t.ID]; dup {
+			return nil, fmt.Errorf("load: duplicate task id %d found in %s", t.ID, m.filePath)
+		}
+		seenIDs[t.ID] = struct{}{}
+	}
+
 	return tasks, nil
 }
 
@@ -232,12 +269,13 @@ func isValidPriority(p string) bool {
 }
 
 // List returns all tasks, optionally filtered by priority and/or overdue status.
-// priority must be one of "low", "medium", "high", or "" (empty = no filter).
+// priority must be one of "low", "medium", "high", or "" (empty = no filter)
 // When overdueOnly is true only incomplete tasks whose due date has passed are returned.
 // Returns an error if priority is not a valid value.
 //
 // Fixes #73: the mutex is held for the full duration including the filtering
 // step to prevent TOCTOU races.
+// Fixes #82: uses defer m.mu.Unlock() consistent with all other Manager methods.
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 	// Validate priority at the library boundary — consistent with Add().
 	if !isValidPriority(priority) {
