@@ -82,6 +82,37 @@ func TestRun_InvalidFilePath(t *testing.T) {
 	}
 }
 
+// TestRun_TraversalPathRejected verifies that a --file value containing a
+// directory traversal sequence (e.g. "../etc/passwd") is rejected.
+// The authoritative check lives in NewManager (Fixes #83): main.go delegates
+// entirely to NewManager rather than duplicating a weaker strings.Contains check.
+func TestRun_TraversalPathRejected(t *testing.T) {
+	err := run([]string{"taskctl", "--file", "../etc/passwd", "list"}, newBuf())
+	if err == nil {
+		t.Fatal("run with traversal path: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to initialise task manager") {
+		t.Errorf("traversal path: error should mention manager init failure, got: %v", err)
+	}
+}
+
+// TestRun_FooDotDotBarAccepted verifies that a filename like "foo..bar"
+// (which contains ".." as a substring but is NOT a traversal) is accepted.
+// The old strings.Contains check in main.go would incorrectly reject this;
+// the authoritative NewManager check uses filepath.Clean + HasPrefix which
+// correctly allows it (Fixes #83).
+func TestRun_FooDotDotBarAccepted(t *testing.T) {
+	chdirTemp(t)
+	// "foo..bar" is a valid relative filename — it must not be rejected as
+	// traversal. The call may still return an error for other reasons (e.g.
+	// empty command args), but any error must not mention "traversal".
+	err := run([]string{"taskctl", "--file", "foo..bar", "list"}, newBuf())
+	if err != nil && strings.Contains(err.Error(), "traversal") {
+		t.Errorf("foo..bar should be accepted as a valid filename, got: %v", err)
+	}
+}
+
+
 func TestRun_HelpFlag(t *testing.T) {
 	err := run([]string{"taskctl", "--help"}, newBuf())
 	if err != nil {
