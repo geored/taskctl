@@ -99,6 +99,8 @@ docker run --rm taskctl list
 docker run --rm taskctl list --priority high
 ```
 
+> **Note:** The Docker image is built on `scratch` and contains no timezone database. All time comparisons (e.g., `IsOverdue`, `stats`) run in **UTC**. Setting the `TZ` environment variable has no effect inside the container.
+
 > **Tip:** Mount a local volume if you want tasks to persist between container runs:
 > ```bash
 > docker run --rm -v $(pwd)/data:/data taskctl list
