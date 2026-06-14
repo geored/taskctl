@@ -324,11 +324,23 @@ func runStats(mgr *task.Manager, w io.Writer) error {
 // It removes all tasks marked as done and prints how many were cleared and
 // how many tasks remain. Returns an error instead of calling os.Exit so that
 // the caller (main) controls the exit code and tests can capture errors.
+// pluralize returns word + "s" unless n == 1, implementing English
+// singular/plural convention where only the count 1 is singular.
+// Zero is treated as plural by English convention.
+func pluralize(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
 func runClear(mgr *task.Manager, w io.Writer) error {
 	cleared, remaining, err := mgr.Clear()
 	if err != nil {
 		return fmt.Errorf("clear: %w", err)
 	}
-	fmt.Fprintf(w, "Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
+	fmt.Fprintf(w, "Cleared %d completed %s. %d %s remaining.\n",
+		cleared, pluralize(cleared, "task"),
+		remaining, pluralize(remaining, "task"))
 	return nil
 }

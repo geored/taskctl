@@ -403,7 +403,7 @@ func TestRunClear_NothingToClear(t *testing.T) {
 		t.Errorf("runClear: unexpected error: %v", err)
 	}
 
-	want := "Cleared 0 completed tasks. 1 tasks remaining.\n"
+	want := "Cleared 0 completed tasks. 1 task remaining.\n"
 	if got := buf.String(); got != want {
 		t.Errorf("runClear output:\n  got:  %q\n  want: %q", got, want)
 	}
