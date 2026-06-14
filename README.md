@@ -15,11 +15,13 @@
   - [From Source](#from-source)
   - [Docker](#docker)
 - [CLI Reference](#cli-reference)
+  - [Global Flags](#global-flags)
   - [add](#add)
   - [list](#list)
   - [done](#done)
   - [delete](#delete)
   - [stats](#stats)
+  - [clear](#clear)
 - [Examples](#examples)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -43,6 +45,7 @@
 | ✅ **Complete tasks** | Mark a task as done by its ID |
 | 🗑️ **Delete tasks** | Remove a task permanently by its ID |
 | 📊 **Task statistics** | View total, pending, completed, overdue counts and completion rate with `stats` |
+| 🧹 **Clear completed** | Remove all completed tasks in one shot with `clear` |
 | 📅 **Due dates** | Attach an optional due date (YYYY-MM-DD) to any task with `--due` |
 | ⚠️ **Overdue detection** | Tasks past their due date are flagged `[OVERDUE]`; filter with `--overdue` |
 
@@ -104,6 +107,50 @@ docker run --rm taskctl list --priority high
 ---
 
 ## CLI Reference
+
+### Global Flags
+
+These flags apply to every subcommand and may be placed **before or after** the subcommand name.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--file <path>` | `tasks.json` | Path to the tasks JSON file. Accepts `--file <path>` or `--file=<path>`. |
+| `--version` | — | Print the version string and exit. |
+| `--help`, `-h` | — | Show the help message and exit. |
+
+#### `--file`
+
+By default, taskctl reads and writes tasks from `tasks.json` in the current directory. Use `--file` to point to any other JSON file, which is useful when you maintain separate task lists (e.g., one per project).
+
+```
+taskctl --file <path> <command> [options]
+taskctl <command> --file <path> [options]
+taskctl <command> [options] --file=<path>
+```
+
+All three forms are equivalent — `--file` is recognised regardless of where it appears in the argument list.
+
+**Examples:**
+
+```bash
+# Use a custom tasks file placed before the subcommand
+taskctl --file ~/work/tasks.json list
+
+# Use a custom tasks file placed after the subcommand
+taskctl list --file ~/work/tasks.json
+
+# Use the equals-sign form
+taskctl add "Plan Q3 goals" --file=~/work/tasks.json --priority high
+
+# Keep separate task lists for different projects
+taskctl --file ~/projects/alpha/tasks.json add "Implement login" --priority high
+taskctl --file ~/projects/beta/tasks.json  add "Write API docs"  --priority medium
+
+# List tasks from a non-default file
+taskctl --file /tmp/sprint-42.json list --priority high
+```
+
+---
 
 ### `add`
 
@@ -262,6 +309,31 @@ Completion rate: 41%
 
 ---
 
+### `clear`
+
+Remove all completed (done) tasks from the task list in one operation. Pending tasks are left untouched.
+
+```
+taskctl clear
+```
+
+No flags are accepted. The command prints how many tasks were cleared and how many remain.
+
+**Example:**
+
+```bash
+taskctl clear
+# Cleared 3 completed tasks. 5 tasks remaining.
+```
+
+**Notes:**
+
+- Only tasks marked done via `taskctl done <id>` are removed.
+- The operation is irreversible — cleared tasks cannot be recovered.
+- If there are no completed tasks, the count reported will be `0`.
+
+---
+
 ## Examples
 
 A full end-to-end workflow:
@@ -312,16 +384,24 @@ taskctl list --priority high
 taskctl delete 3
 # Task 3 deleted.
 
-# 8. Check statistics
+# 8. Clear all completed tasks
+taskctl clear
+# Cleared 1 completed tasks. 3 tasks remaining.
+
+# 9. Check statistics
 taskctl stats
-# Total tasks:     4
+# Total tasks:     3
 #   Pending:       3
-#   Completed:     1
+#   Completed:     0
 #   Overdue:       1
-#   High priority: 2
+#   High priority: 1
 #   Med priority:  2
 #   Low priority:  0
-# Completion rate: 25%
+# Completion rate: 0%
+
+# 10. Use a custom tasks file (flag before or after the subcommand — both work)
+taskctl --file ~/work/tasks.json list
+taskctl list --file ~/work/tasks.json
 ```
 
 ---
