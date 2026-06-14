@@ -21,6 +21,10 @@ var version = "dev"
 // Fixes #76: reject excessively long file paths.
 const maxFilePathLen = 4096
 
+// maxDueDateLen is the maximum allowed length for the --due flag value.
+// Fixes #85: reject excessively long due date strings before time.Parse.
+const maxDueDateLen = 10
+
 func init() {
 	// Remove the default timestamp prefix from log messages so that the CLI
 	// output is clean; the caller sees only the message itself.
@@ -167,7 +171,11 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	// Validate the --due flag value at the CLI boundary before calling the library.
 	// Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
 	// so that the substring is unambiguous for both users and tests.
+	// Fixes #85: guard against excessively long --due values before time.Parse.
 	if *due != "" {
+		if len(*due) > maxDueDateLen {
+			return fmt.Errorf("add: --due value exceeds maximum length")
+		}
 		if _, err := time.Parse("2006-01-02", *due); err != nil {
 			return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
 		}

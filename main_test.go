@@ -450,3 +450,22 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// runAdd --due length limit tests (Issue #85)
+// ---------------------------------------------------------------------------
+
+// TestRunAdd_DueDateExceedsMaxLength verifies that a --due value longer than
+// maxDueDateLen (10) is rejected before time.Parse is ever called.
+func TestRunAdd_DueDateExceedsMaxLength(t *testing.T) {
+	mgr := newTestManager(t)
+	// Supply a --due value that is far longer than the 10-character YYYY-MM-DD limit.
+	oversized := strings.Repeat("x", 100)
+	err := runAdd(mgr, []string{"--due", oversized, "My task"}, newBuf())
+	if err == nil {
+		t.Fatal("runAdd with oversized --due: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum length") {
+		t.Errorf("error should mention exceeds maximum length, got: %v", err)
+	}
+}
