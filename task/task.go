@@ -73,8 +73,9 @@ type Manager struct {
 // NewManager creates a Manager that stores tasks in the given file.
 // filePath is cleaned with filepath.Clean before use. The library enforces
 // that filePath must be a relative path that does not escape the current
-// working directory: absolute paths and paths beginning with ".." are both
-// rejected with a descriptive error.
+// working directory: absolute paths, paths beginning with "..", and paths
+// whose symlink-resolved form escapes the working directory are all rejected
+// with a descriptive error. Fixes #87.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 
@@ -88,6 +89,41 @@ func NewManager(filePath string) (*Manager, error) {
 	// it points outside the current working directory.
 	if strings.HasPrefix(clean, "..") {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
+	}
+
+	// Defense-in-depth: resolve symlinks to detect symlink-based traversal.
+	// Fixes #87.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("NewManager: could not determine working directory: %w", err)
+	}
+
+	// Form the absolute path by joining cwd with the cleaned relative path.
+	absPath := filepath.Join(cwd, clean)
+
+	// Resolve symlinks on the parent directory rather than the full path,
+	// because the target file may not yet exist (new store). The parent
+	// directory components can still contain symlinks that escape cwd.
+	parentDir := filepath.Dir(absPath)
+	baseName := filepath.Base(absPath)
+
+	resolvedParent, evalErr := filepath.EvalSymlinks(parentDir)
+	if evalErr != nil {
+		if errors.Is(evalErr, os.ErrNotExist) {
+			// Parent directory doesn't exist yet — nothing to follow.
+			// Fall back to the raw absolute path for the prefix check.
+			resolvedParent = parentDir
+		} else {
+			return nil, fmt.Errorf("NewManager: could not resolve path %q: %w", filePath, evalErr)
+		}
+	}
+
+	resolvedFull := filepath.Join(resolvedParent, baseName)
+
+	// Ensure the resolved path is still within the working directory.
+	// We require it to either equal cwd or be a child of it (cwd + separator).
+	if resolvedFull != cwd && !strings.HasPrefix(resolvedFull, cwd+string(filepath.Separator)) {
+		return nil, fmt.Errorf("NewManager: path %q resolves outside working directory", filePath)
 	}
 
 	return &Manager{filePath: clean}, nil
