@@ -1,0 +1,986 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>taskctl: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/geored/taskctl/main.go (87.8%)</option>
+				
+				<option value="file1">github.com/geored/taskctl/task/task.go (84.7%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "flag"
+        "fmt"
+        "io"
+        "log"
+        "os"
+        "strconv"
+        "strings"
+        "time"
+
+        "github.com/geored/taskctl/task"
+)
+
+// version is set at build time via -ldflags "-X main.version=&lt;tag&gt;".
+// Fixes #74: support taskctl --version and taskctl version.
+var version = "dev"
+
+// maxFilePathLen is the maximum allowed length for the --file flag value.
+// Fixes #76: reject excessively long file paths.
+const maxFilePathLen = 4096
+
+// maxDueDateLen is the maximum allowed length for the --due flag value.
+// YYYY-MM-DD is exactly 10 characters.
+// Fixes #85: reject excessively long due date strings before time.Parse.
+const maxDueDateLen = 10
+
+func init() <span class="cov1" title="1">{
+        // Remove the default timestamp prefix from log messages so that the CLI
+        // output is clean; the caller sees only the message itself.
+        log.SetFlags(0)
+}</span>
+
+func main() <span class="cov0" title="0">{
+        if err := run(os.Args, os.Stdout); err != nil </span><span class="cov0" title="0">{
+                log.Print(err)
+                os.Exit(1)
+        }</span>
+}
+
+// run is the testable entry-point for the CLI. args is the full argument list
+// (including the program name at index 0). w receives any output that would
+// normally go to stdout.
+func run(args []string, w io.Writer) error <span class="cov8" title="23">{
+        if len(args) &lt; 2 </span><span class="cov1" title="1">{
+                printUsage()
+                return fmt.Errorf("no command specified")
+        }</span>
+
+        // Support top-level --help / -h before any subcommand.
+        <span class="cov8" title="22">if args[1] == "--help" || args[1] == "-h" </span><span class="cov2" title="2">{
+                printUsage()
+                return nil
+        }</span>
+
+        // Support --version / version subcommand. Fixes #74.
+        <span class="cov7" title="20">if args[1] == "--version" || args[1] == "-version" || args[1] == "version" </span><span class="cov0" title="0">{
+                fmt.Fprintf(w, "taskctl version %s\n", version)
+                return nil
+        }</span>
+
+        // Parse the top-level --file flag, which may appear before or after the
+        // subcommand. We do a quick pre-scan for --file / --file=&lt;val&gt; so that
+        // `taskctl --file x.json add ...` works as well as `taskctl add --file x.json ...`.
+        <span class="cov7" title="20">filePath := "tasks.json"
+        remaining := args[1:]
+        for i := 0; i &lt; len(remaining); i++ </span><span class="cov10" title="49">{
+                a := remaining[i]
+                if a == "--file" || a == "-file" </span><span class="cov6" title="13">{
+                        if i+1 &lt; len(remaining) </span><span class="cov6" title="12">{
+                                filePath = remaining[i+1]
+                                remaining = append(remaining[:i], remaining[i+2:]...)
+                                i--
+                        }</span>
+                } else<span class="cov9" title="36"> if strings.HasPrefix(a, "--file=") </span><span class="cov4" title="4">{
+                        filePath = strings.TrimPrefix(a, "--file=")
+                        remaining = append(remaining[:i], remaining[i+1:]...)
+                        i--
+                }</span> else<span class="cov9" title="32"> if strings.HasPrefix(a, "-file=") </span><span class="cov1" title="1">{
+                        filePath = strings.TrimPrefix(a, "-file=")
+                        remaining = append(remaining[:i], remaining[i+1:]...)
+                        i--
+                }</span>
+        }
+
+        // Validate --file path length. Fixes #76.
+        <span class="cov7" title="20">if len(filePath) &gt; maxFilePathLen </span><span class="cov1" title="1">{
+                return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
+        }</span>
+
+        // Fixes #83: path traversal and absolute-path validation is delegated
+        // entirely to NewManager, which uses filepath.Clean + IsAbs + HasPrefix
+        // checks as the single authoritative layer. We do not duplicate that logic
+        // here so there is no risk of the two checks diverging.
+
+        <span class="cov7" title="19">if len(remaining) == 0 </span><span class="cov0" title="0">{
+                printUsage()
+                return fmt.Errorf("no command specified")
+        }</span>
+
+        <span class="cov7" title="19">cmd := remaining[0]
+        cmdArgs := remaining[1:]
+
+        mgr, err := task.NewManager(filePath)
+        if err != nil </span><span class="cov3" title="3">{
+                return fmt.Errorf("failed to initialise task manager: %w", err)
+        }</span>
+
+        <span class="cov7" title="16">switch cmd </span>{
+        case "add":<span class="cov6" title="10">
+                return runAdd(mgr, cmdArgs, w)</span>
+        case "list":<span class="cov4" title="4">
+                return runList(mgr, cmdArgs, w)</span>
+        case "done":<span class="cov0" title="0">
+                return runDone(mgr, cmdArgs, w)</span>
+        case "delete":<span class="cov0" title="0">
+                return runDelete(mgr, cmdArgs, w)</span>
+        case "stats":<span class="cov0" title="0">
+                return runStats(mgr, w)</span>
+        case "clear":<span class="cov0" title="0">
+                return runClear(mgr, w)</span>
+        default:<span class="cov2" title="2">
+                printUsage()
+                return fmt.Errorf("unknown command: %s", cmd)</span>
+        }
+}
+
+// printUsage writes a short help message to stderr.
+func printUsage() <span class="cov4" title="5">{
+        fmt.Fprintln(os.Stderr, `Usage: taskctl [--file &lt;path&gt;] &lt;command&gt; [options]
+
+Global flags:
+  --file &lt;path&gt;   Path to the tasks JSON file (default: tasks.json)
+  --version       Print the version string and exit
+  --help, -h      Show this help message
+
+Commands:
+  add     [--priority &lt;low|medium|high&gt;] [--due YYYY-MM-DD] &lt;title&gt;
+  list    [--priority &lt;low|medium|high&gt;] [--overdue]
+  done    &lt;id&gt;
+  delete  &lt;id&gt;
+  stats
+  clear   Remove all completed (done) tasks
+  version Print the version string`)
+}</span>
+
+// runAdd handles the "add" sub-command.
+// Flags: --priority (default "medium"), --due (optional, YYYY-MM-DD).
+// Remaining args after flag parsing are joined as the task title.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runAdd(mgr *task.Manager, args []string, w io.Writer) error <span class="cov9" title="32">{
+        fs := flag.NewFlagSet("add", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        priority := fs.String("priority", "medium", "Task priority: low, medium, high")
+        due := fs.String("due", "", "Optional due date in YYYY-MM-DD format")
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("add: %w", err)
+        }</span>
+
+        <span class="cov9" title="32">if fs.NArg() == 0 </span><span class="cov1" title="1">{
+                return fmt.Errorf("add: task title is required")
+        }</span>
+
+        // Join remaining positional arguments as the title so that users do not
+        // need to quote multi-word titles.
+        <span class="cov8" title="31">title := strings.TrimSpace(strings.Join(fs.Args(), " "))
+        if title == "" </span><span class="cov0" title="0">{
+                return fmt.Errorf("add: task title must not be empty")
+        }</span>
+
+        // Validate the --due flag value at the CLI boundary before calling the library.
+        // Fixes #85: reject oversized input before time.Parse is called.
+        // Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
+        // so that the substring is unambiguous for both users and tests.
+        <span class="cov8" title="31">if *due != "" </span><span class="cov4" title="4">{
+                if len(*due) &gt; maxDueDateLen </span><span class="cov1" title="1">{
+                        return fmt.Errorf("add: --due value exceeds maximum length of %d characters", maxDueDateLen)
+                }</span>
+                <span class="cov3" title="3">if _, err := time.Parse("2006-01-02", *due); err != nil </span><span class="cov1" title="1">{
+                        return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
+                }</span>
+        }
+
+        <span class="cov8" title="29">if err := mgr.Add(title, *priority, *due); err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("add: %w", err)
+        }</span>
+        <span class="cov8" title="28">fmt.Fprintln(w, "Task added.")
+        return nil</span>
+}
+
+// runList handles the "list" sub-command.
+// Flags: --priority (filter by priority), --overdue (show only overdue tasks).
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runList(mgr *task.Manager, args []string, w io.Writer) error <span class="cov6" title="10">{
+        fs := flag.NewFlagSet("list", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        priority := fs.String("priority", "", "Filter by priority: low, medium, high")
+        overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("list: %w", err)
+        }</span>
+
+        // Validate the --priority flag value at the CLI boundary.
+        <span class="cov6" title="10">if *priority != "" </span><span class="cov3" title="3">{
+                switch *priority </span>{
+                case "low", "medium", "high":<span class="cov2" title="2"></span>
+                        // valid
+                default:<span class="cov1" title="1">
+                        return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)</span>
+                }
+        }
+
+        <span class="cov6" title="9">tasks, err := mgr.List(*priority, *overdueOnly)
+        if err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("list: %w", err)
+        }</span>
+
+        <span class="cov5" title="8">if len(tasks) == 0 </span><span class="cov1" title="1">{
+                fmt.Fprintln(w, "No tasks found.")
+                return nil
+        }</span>
+
+        <span class="cov5" title="7">now := time.Now()
+
+        // Header
+        fmt.Fprintf(w, "%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
+        fmt.Fprintln(w, "------------------------------------------------------")
+
+        for _, t := range tasks </span><span class="cov5" title="8">{
+                done := "[ ]"
+                if t.Done </span><span class="cov0" title="0">{
+                        done = "[x]"
+                }</span>
+
+                <span class="cov5" title="8">due := t.DueDate
+                if due == "" </span><span class="cov5" title="7">{
+                        due = "-"
+                }</span>
+
+                // Append an [OVERDUE] marker for incomplete tasks past their due date.
+                <span class="cov5" title="8">title := t.Title
+                if t.IsOverdue(now) </span><span class="cov1" title="1">{
+                        title += " [OVERDUE]"
+                }</span>
+
+                <span class="cov5" title="8">fmt.Fprintf(w, "%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)</span>
+        }
+        <span class="cov5" title="7">return nil</span>
+}
+
+// runDone handles the "done" sub-command.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDone(mgr *task.Manager, args []string, w io.Writer) error <span class="cov5" title="7">{
+        fs := flag.NewFlagSet("done", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("done: %w", err)
+        }</span>
+
+        <span class="cov5" title="7">if fs.NArg() == 0 </span><span class="cov1" title="1">{
+                return fmt.Errorf("done: task ID is required")
+        }</span>
+        <span class="cov5" title="6">id, err := strconv.Atoi(fs.Arg(0))
+        if err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("done: invalid task ID: %s", fs.Arg(0))
+        }</span>
+        // Fixes #81: reject non-positive IDs at the CLI boundary.
+        <span class="cov4" title="5">if id &lt;= 0 </span><span class="cov2" title="2">{
+                return fmt.Errorf("done: task ID must be a positive integer")
+        }</span>
+        <span class="cov3" title="3">if err := mgr.Complete(id); err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("done: %w", err)
+        }</span>
+        <span class="cov2" title="2">fmt.Fprintf(w, "Task %d marked as done.\n", id)
+        return nil</span>
+}
+
+// runDelete handles the "delete" sub-command.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDelete(mgr *task.Manager, args []string, w io.Writer) error <span class="cov5" title="6">{
+        fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("delete: %w", err)
+        }</span>
+
+        <span class="cov5" title="6">if fs.NArg() == 0 </span><span class="cov1" title="1">{
+                return fmt.Errorf("delete: task ID is required")
+        }</span>
+        <span class="cov4" title="5">id, err := strconv.Atoi(fs.Arg(0))
+        if err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("delete: invalid task ID: %s", fs.Arg(0))
+        }</span>
+        // Fixes #81: reject non-positive IDs at the CLI boundary.
+        <span class="cov4" title="4">if id &lt;= 0 </span><span class="cov2" title="2">{
+                return fmt.Errorf("delete: task ID must be a positive integer")
+        }</span>
+        <span class="cov2" title="2">if err := mgr.Delete(id); err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("delete: %w", err)
+        }</span>
+        <span class="cov1" title="1">fmt.Fprintf(w, "Task %d deleted.\n", id)
+        return nil</span>
+}
+
+// runStats handles the "stats" sub-command.
+// It prints a summary that includes completion counts, overdue count,
+// per-priority task counts, and the overall completion rate.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runStats(mgr *task.Manager, w io.Writer) error <span class="cov2" title="2">{
+        s, err := mgr.Stats()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("stats: %w", err)
+        }</span>
+
+        <span class="cov2" title="2">pct := 0
+        if s.Total &gt; 0 </span><span class="cov1" title="1">{
+                pct = s.Completed * 100 / s.Total
+        }</span>
+
+        <span class="cov2" title="2">fmt.Fprintf(w, "Total tasks:     %d\n", s.Total)
+        fmt.Fprintf(w, "  Pending:       %d\n", s.Pending)
+        fmt.Fprintf(w, "  Completed:     %d\n", s.Completed)
+        fmt.Fprintf(w, "  Overdue:       %d\n", s.Overdue)
+        fmt.Fprintf(w, "  High priority: %d\n", s.HighPriority)
+        fmt.Fprintf(w, "  Med priority:  %d\n", s.MediumPriority)
+        fmt.Fprintf(w, "  Low priority:  %d\n", s.LowPriority)
+        fmt.Fprintf(w, "Completion rate: %d%%\n", pct)
+        return nil</span>
+}
+
+// runClear handles the "clear" sub-command.
+// It removes all tasks marked as done and prints how many were cleared and
+// how many tasks remain. Returns an error instead of calling os.Exit so that
+// the caller (main) controls the exit code and tests can capture errors.
+func runClear(mgr *task.Manager, w io.Writer) error <span class="cov4" title="4">{
+        cleared, remaining, err := mgr.Clear()
+        if err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("clear: %w", err)
+        }</span>
+        <span class="cov3" title="3">clearedWord := "tasks"
+        if cleared == 1 </span><span class="cov0" title="0">{ clearedWord = "task" }</span>
+        <span class="cov3" title="3">remainingWord := "tasks"
+        if remaining == 1 </span><span class="cov1" title="1">{ remainingWord = "task" }</span>
+        <span class="cov3" title="3">fmt.Fprintf(w, "Cleared %d completed %s. %d %s remaining.\n", cleared, clearedWord, remaining, remainingWord)
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package task
+
+import (
+        "encoding/json"
+        "errors"
+        "fmt"
+        "log"
+        "os"
+        "path/filepath"
+        "strings"
+        "sync"
+        "time"
+        "unicode/utf8"
+)
+
+// dateLayout is the canonical date format accepted and displayed by taskctl.
+const dateLayout = "2006-01-02"
+
+// maxTitleLength is the maximum number of Unicode characters (runes) allowed
+// in a task title. Titles longer than this are rejected at the Add boundary
+// to prevent unbounded storage growth and UI display issues.
+// Fixes #48: raised from 256 to 1000 per security requirement.
+const maxTitleLength = 1000
+
+// Task represents a single to-do item.
+type Task struct {
+        ID       int    `json:"id"`
+        Title    string `json:"title"`
+        Done     bool   `json:"done"`
+        Priority string `json:"priority"`
+        // DueDate holds an optional due date in YYYY-MM-DD format.
+        // An empty string means no due date has been set.
+        DueDate string `json:"due_date,omitempty"`
+}
+
+// IsOverdue reports whether the task is incomplete and its due date has passed
+// relative to the given reference time (typically time.Now()).
+// Tasks with no due date are never considered overdue.
+// If DueDate is a non-empty string that cannot be parsed, IsOverdue logs a
+// warning and returns false.
+//
+// Comparison is performed in UTC so that the result is consistent regardless
+// of the local timezone: a task due on date D is considered overdue only when
+// the UTC date of now is strictly after D.
+func (t Task) IsOverdue(now time.Time) bool <span class="cov5" title="17">{
+        if t.Done || t.DueDate == "" </span><span class="cov3" title="8">{
+                return false
+        }</span>
+        <span class="cov4" title="9">due, err := time.Parse(dateLayout, t.DueDate)
+        if err != nil </span><span class="cov0" title="0">{
+                log.Printf("warning: task %d has malformed due date %q: %v", t.ID, t.DueDate, err)
+                return false
+        }</span>
+        // Normalise now to UTC midnight so the comparison is purely date-based
+        // and is not affected by the host's local timezone.
+        <span class="cov4" title="9">nowUTC := now.UTC()
+        nowDate := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+        // due is already in UTC midnight because time.Parse uses UTC when no
+        // timezone is embedded in the layout/value.
+        return nowDate.After(due)</span>
+}
+
+// Manager handles persistence and business logic for the task list.
+// A mutex is embedded to serialise access when multiple goroutines (or, via
+// OS-level file locks, multiple processes) share the same Manager instance.
+//
+// TODO(#17): add OS-level file locking for multi-process safety.
+type Manager struct {
+        filePath string
+        mu       sync.Mutex
+}
+
+// NewManager creates a Manager that stores tasks in the given file.
+// filePath is cleaned with filepath.Clean before use. The library enforces
+// that filePath must be a relative path that does not escape the current
+// working directory: absolute paths and paths beginning with ".." are both
+// rejected with a descriptive error.
+//
+// As defense-in-depth against symlink-based traversal (Fixes #87), the
+// resolved absolute path (after EvalSymlinks on any existing components) is
+// verified to still be rooted inside the current working directory.
+func NewManager(filePath string) (*Manager, error) <span class="cov6" title="45">{
+        clean := filepath.Clean(filePath)
+
+        // Reject absolute paths — the library only supports relative paths within
+        // the current working directory.
+        if filepath.IsAbs(clean) </span><span class="cov2" title="3">{
+                return nil, fmt.Errorf("NewManager: path %q must be a relative path", filePath)
+        }</span>
+
+        // Reject obvious traversal attempts: if the cleaned path starts with ".."
+        // it points outside the current working directory.
+        <span class="cov6" title="42">if strings.HasPrefix(clean, "..") </span><span class="cov2" title="3">{
+                return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
+        }</span>
+
+        // Defense-in-depth: resolve symlinks and verify the result stays within
+        // the current working directory (Fixes #87).
+        <span class="cov6" title="39">cwd, err := os.Getwd()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("NewManager: could not determine working directory: %w", err)
+        }</span>
+
+        <span class="cov6" title="39">joined := filepath.Join(cwd, clean)
+
+        // Attempt to resolve symlinks on the full path. If the file (or a
+        // component of its path) does not yet exist, EvalSymlinks will return an
+        // error. In that case we fall back to resolving only the existing prefix
+        // of the path so that newly-created files are still accepted while
+        // symlinks in existing parent directories are still detected.
+        resolved, err := filepath.EvalSymlinks(joined)
+        if err != nil </span><span class="cov6" title="38">{
+                resolved, err = evalSymlinksPartial(joined)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("NewManager: cannot resolve path %q: %w", filePath, err)
+                }</span>
+        }
+
+        // The resolved path must be rooted inside cwd (with a separator to avoid
+        // false positives where cwd is a prefix of an unrelated sibling path).
+        <span class="cov6" title="39">cwdWithSep := cwd + string(filepath.Separator)
+        if resolved != cwd &amp;&amp; !strings.HasPrefix(resolved, cwdWithSep) </span><span class="cov1" title="1">{
+                return nil, fmt.Errorf("NewManager: path %q attempts directory traversal via symlink", filePath)
+        }</span>
+
+        <span class="cov6" title="38">return &amp;Manager{filePath: clean}, nil</span>
+}
+
+// evalSymlinksPartial resolves symlinks on the longest existing prefix of
+// absPath and returns the fully resolved path (existing prefix resolved +
+// non-existing suffix re-appended). absPath must be an absolute path.
+func evalSymlinksPartial(absPath string) (string, error) <span class="cov6" title="38">{
+        dir := absPath
+        suffix := ""
+
+        for </span><span class="cov7" title="77">{
+                parent := filepath.Dir(dir)
+                if parent == dir </span><span class="cov0" title="0">{
+                        // Reached the filesystem root without finding an existing component.
+                        return "", fmt.Errorf("evalSymlinksPartial: could not find existing prefix for %q", absPath)
+                }</span>
+
+                <span class="cov7" title="77">resolved, err := filepath.EvalSymlinks(dir)
+                if err == nil </span><span class="cov6" title="38">{
+                        // dir exists and is fully resolved; reattach any trailing suffix.
+                        if suffix == "" </span><span class="cov0" title="0">{
+                                return resolved, nil
+                        }</span>
+                        <span class="cov6" title="38">return filepath.Join(resolved, suffix), nil</span>
+                }
+
+                // dir does not exist yet; strip the last component into suffix.
+                <span class="cov6" title="39">base := filepath.Base(dir)
+                if suffix == "" </span><span class="cov6" title="38">{
+                        suffix = base
+                }</span> else<span class="cov1" title="1"> {
+                        suffix = filepath.Join(base, suffix)
+                }</span>
+                <span class="cov6" title="39">dir = parent</span>
+        }
+}
+
+// load reads all tasks from disk. It returns an empty slice when the file does
+// not yet exist. Callers must hold m.mu before calling load.
+//
+// Fixes #30: JSON parse errors now include the file path.
+// Fixes #80: Post-deserialization validation rejects records with invalid IDs,
+// empty titles, unknown priorities, malformed due dates, or duplicate IDs.
+func (m *Manager) load() ([]Task, error) <span class="cov8" title="138">{
+        data, err := os.ReadFile(m.filePath)
+        if err != nil </span><span class="cov5" title="29">{
+                if errors.Is(err, os.ErrNotExist) </span><span class="cov5" title="29">{
+                        return make([]Task, 0), nil
+                }</span>
+                <span class="cov0" title="0">return nil, fmt.Errorf("load: %w", err)</span>
+        }
+        <span class="cov7" title="109">var tasks []Task
+        if err := json.Unmarshal(data, &amp;tasks); err != nil </span><span class="cov1" title="2">{
+                return nil, fmt.Errorf("failed to parse task file %s: %w", m.filePath, err)
+        }</span>
+
+        // Post-deserialization validation: reject any file whose records violate
+        // the invariants that Add() enforces so that a hand-crafted or externally
+        // modified tasks.json cannot corrupt application state. Fixes #80.
+        <span class="cov7" title="107">seenIDs := make(map[int]struct{}, len(tasks))
+        for i, t := range tasks </span><span class="cov10" title="553">{
+                // 1. ID must be a positive integer.
+                if t.ID &lt;= 0 </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("load: record %d has invalid id %d: must be a positive integer", i, t.ID)
+                }</span>
+                // 2. Title must be non-empty.
+                <span class="cov10" title="553">if strings.TrimSpace(t.Title) == "" </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("load: record %d (id %d) has empty title", i, t.ID)
+                }</span>
+                // 3. Priority must be one of the accepted values.
+                <span class="cov10" title="553">switch t.Priority </span>{
+                case "high", "medium", "low":<span class="cov10" title="553"></span>
+                        // valid
+                default:<span class="cov0" title="0">
+                        return nil, fmt.Errorf("load: record %d (id %d) has unknown priority %q: must be high, medium, or low", i, t.ID, t.Priority)</span>
+                }
+                // 4. DueDate must be empty or in YYYY-MM-DD format.
+                <span class="cov10" title="553">if t.DueDate != "" </span><span class="cov5" title="28">{
+                        if _, err := time.Parse(dateLayout, t.DueDate); err != nil </span><span class="cov0" title="0">{
+                                return nil, fmt.Errorf("load: record %d (id %d) has malformed due_date %q: expected YYYY-MM-DD", i, t.ID, t.DueDate)
+                        }</span>
+                }
+                // 5. No duplicate IDs.
+                <span class="cov10" title="553">if _, dup := seenIDs[t.ID]; dup </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("load: duplicate task id %d found in %s", t.ID, m.filePath)
+                }</span>
+                <span class="cov10" title="553">seenIDs[t.ID] = struct{}{}</span>
+        }
+
+        <span class="cov7" title="107">return tasks, nil</span>
+}
+
+// save writes the task slice to disk as JSON using an atomic write-to-temp +
+// rename pattern. The file is created with mode 0600 (owner read/write only).
+// An fsync is performed on the temp file before the rename to ensure data is
+// durable on disk even in the event of a crash.
+// Callers must hold m.mu before calling save.
+func (m *Manager) save(tasks []Task) error <span class="cov7" title="80">{
+        data, err := json.MarshalIndent(tasks, "", "  ")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("save: marshal: %w", err)
+        }</span>
+
+        <span class="cov7" title="80">dir := filepath.Dir(m.filePath)
+        tmp, err := os.CreateTemp(dir, "tasks-*.tmp")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("save: create temp: %w", err)
+        }</span>
+        <span class="cov7" title="80">tmpName := tmp.Name()
+        // Clean up the temp file on any error path; if Rename succeeded the file
+        // no longer exists under tmpName and Remove is a harmless no-op.
+        defer func() </span><span class="cov7" title="80">{
+                os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+        }</span>()
+
+        <span class="cov7" title="80">if err := tmp.Chmod(0600); err != nil </span><span class="cov0" title="0">{
+                tmp.Close()
+                return fmt.Errorf("save: chmod: %w", err)
+        }</span>
+        <span class="cov7" title="80">if _, err := tmp.Write(data); err != nil </span><span class="cov0" title="0">{
+                tmp.Close()
+                return fmt.Errorf("save: write: %w", err)
+        }</span>
+        // Sync flushes kernel buffers to disk, ensuring durability before rename.
+        <span class="cov7" title="80">if err := tmp.Sync(); err != nil </span><span class="cov0" title="0">{
+                tmp.Close()
+                return fmt.Errorf("save: sync: %w", err)
+        }</span>
+        <span class="cov7" title="80">if err := tmp.Close(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("save: close: %w", err)
+        }</span>
+        <span class="cov7" title="80">if err := os.Rename(tmpName, m.filePath); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("save: rename: %w", err)
+        }</span>
+        <span class="cov7" title="80">return nil</span>
+}
+
+// Add creates a new task with the given title, priority, and optional due date.
+// title must be a non-empty string of at most maxTitleLength Unicode characters.
+// priority must be one of "high", "medium", or "low".
+// dueDate must be in YYYY-MM-DD format or empty string for no due date.
+// Returns an error if any input is invalid.
+// Fixes #48: enforces maximum title length of 1000 characters.
+func (m *Manager) Add(title, priority, dueDate string) error <span class="cov7" title="79">{
+        // Validate title at the public API boundary.
+        trimmed := strings.TrimSpace(title)
+        if trimmed == "" </span><span class="cov2" title="4">{
+                return fmt.Errorf("task title must not be empty")
+        }</span>
+        // Count Unicode code points (runes), not bytes, so that multibyte
+        // characters such as emoji are counted correctly (Fixes #69).
+        <span class="cov7" title="75">if utf8.RuneCountInString(trimmed) &gt; maxTitleLength </span><span class="cov1" title="1">{
+                return fmt.Errorf("task title exceeds maximum length of %d characters", maxTitleLength)
+        }</span>
+
+        // Validate priority at the public API boundary.
+        <span class="cov7" title="74">switch priority </span>{
+        case "high", "medium", "low":<span class="cov7" title="69"></span>
+                // valid
+        default:<span class="cov3" title="5">
+                return fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)</span>
+        }
+
+        // Validate due date format when provided.
+        <span class="cov7" title="69">if dueDate != "" </span><span class="cov3" title="8">{
+                if _, err := time.Parse(dateLayout, dueDate); err != nil </span><span class="cov1" title="1">{
+                        return fmt.Errorf("invalid due date %q: expected YYYY-MM-DD", dueDate)
+                }</span>
+        }
+
+        <span class="cov7" title="68">m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // Determine next ID (max existing ID + 1, or 1 for an empty list).
+        // Guard against integer overflow: if any existing ID equals math.MaxInt,
+        // incrementing would produce a negative value (Fixes #70).
+        <span class="cov7" title="68">nextID := 1
+        for _, t := range tasks </span><span class="cov8" title="232">{
+                if t.ID &gt;= nextID </span><span class="cov8" title="232">{
+                        nextID = t.ID + 1
+                }</span>
+        }
+        <span class="cov7" title="68">if nextID &lt;= 0 </span><span class="cov1" title="1">{
+                return fmt.Errorf("id overflow: task store is full")
+        }</span>
+
+        <span class="cov6" title="67">tasks = append(tasks, Task{
+                ID:       nextID,
+                Title:    trimmed,
+                Done:     false,
+                Priority: priority,
+                DueDate:  dueDate,
+        })
+        return m.save(tasks)</span>
+}
+
+// isValidPriority reports whether p is a valid priority value for filtering.
+// An empty string is also valid (meaning "no filter").
+func isValidPriority(p string) bool <span class="cov6" title="50">{
+        switch p </span>{
+        case "", "low", "medium", "high":<span class="cov6" title="44">
+                return true</span>
+        default:<span class="cov3" title="6">
+                return false</span>
+        }
+}
+
+// List returns all tasks, optionally filtered by priority and/or overdue status.
+// priority must be one of "low", "medium", "high", or "" (empty = no filter)
+// When overdueOnly is true only incomplete tasks whose due date has passed are returned.
+// Returns an error if priority is not a valid value.
+//
+// Fixes #73: the mutex is held for the full duration including the filtering
+// step to prevent TOCTOU races.
+// Fixes #82: uses defer m.mu.Unlock() consistent with all other Manager methods.
+func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) <span class="cov6" title="50">{
+        // Validate priority at the library boundary — consistent with Add().
+        if !isValidPriority(priority) </span><span class="cov3" title="6">{
+                return nil, fmt.Errorf("invalid priority filter %q: must be low, medium, or high", priority)
+        }</span>
+
+        <span class="cov6" title="44">m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        // Filter while holding the lock to prevent TOCTOU races (Fixes #73).
+        <span class="cov6" title="44">now := time.Now()
+        result := make([]Task, 0, len(tasks))
+        for _, t := range tasks </span><span class="cov8" title="260">{
+                if priority != "" &amp;&amp; t.Priority != priority </span><span class="cov3" title="8">{
+                        continue</span>
+                }
+                <span class="cov8" title="252">if overdueOnly &amp;&amp; !t.IsOverdue(now) </span><span class="cov1" title="2">{
+                        continue</span>
+                }
+                <span class="cov8" title="250">result = append(result, t)</span>
+        }
+        <span class="cov6" title="44">return result, nil</span>
+}
+
+// Complete marks the task with the given ID as done and persists the change.
+// Returns an error if id is &lt;= 0 or if no task with that ID exists.
+// Fixes #50: validates that id is a positive integer.
+func (m *Manager) Complete(id int) error <span class="cov4" title="11">{
+        if id &lt;= 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid task ID: %d", id)
+        }</span>
+
+        <span class="cov4" title="11">m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov4" title="11">for i, t := range tasks </span><span class="cov5" title="23">{
+                if t.ID == id </span><span class="cov4" title="9">{
+                        tasks[i].Done = true
+                        return m.save(tasks)
+                }</span>
+        }
+        <span class="cov1" title="2">return fmt.Errorf("task %d not found", id)</span>
+}
+
+// Delete removes the task with the given ID from the store.
+// Returns an error if id is &lt;= 0 or if no task with that ID exists.
+// Fixes #50: validates that id is a positive integer.
+func (m *Manager) Delete(id int) error <span class="cov2" title="3">{
+        if id &lt;= 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid task ID: %d", id)
+        }</span>
+
+        <span class="cov2" title="3">m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov2" title="3">filtered := make([]Task, 0, len(tasks))
+        found := false
+        for _, t := range tasks </span><span class="cov1" title="2">{
+                if t.ID == id </span><span class="cov1" title="1">{
+                        found = true
+                        continue</span>
+                }
+                <span class="cov1" title="1">filtered = append(filtered, t)</span>
+        }
+        <span class="cov2" title="3">if !found </span><span class="cov1" title="2">{
+                return fmt.Errorf("task %d not found", id)
+        }</span>
+        <span class="cov1" title="1">return m.save(filtered)</span>
+}
+
+// Clear removes all completed tasks from the store and returns the count of
+// tasks cleared and the count of tasks remaining. The mutex is held throughout
+// to prevent races. If load or save fails, the store is not modified and a
+// non-nil error is returned.
+//
+// When no tasks are completed, the backing file is not written (Fixes #66).
+func (m *Manager) Clear() (cleared int, remaining int, err error) <span class="cov3" title="6">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov1" title="1">{
+                return 0, 0, err
+        }</span>
+
+        <span class="cov3" title="5">kept := make([]Task, 0, len(tasks))
+        for _, t := range tasks </span><span class="cov4" title="13">{
+                if t.Done </span><span class="cov3" title="6">{
+                        cleared++
+                }</span> else<span class="cov3" title="7"> {
+                        kept = append(kept, t)
+                }</span>
+        }
+        <span class="cov3" title="5">remaining = len(kept)
+
+        // Early return: skip the disk write when nothing was cleared (Fixes #66).
+        if cleared == 0 </span><span class="cov2" title="3">{
+                return 0, remaining, nil
+        }</span>
+
+        <span class="cov1" title="2">if err := m.save(kept); err != nil </span><span class="cov0" title="0">{
+                return 0, 0, err
+        }</span>
+        <span class="cov1" title="2">return cleared, remaining, nil</span>
+}
+
+// Stats holds aggregate counts for the task list.
+type Stats struct {
+        Total     int
+        Completed int
+        Pending   int
+        // Overdue is the number of incomplete tasks whose due date has passed.
+        Overdue int
+
+        // Priority breakdown — counts include both pending and completed tasks.
+        HighPriority   int
+        MediumPriority int
+        LowPriority    int
+}
+
+// Stats computes summary statistics for all tasks in a single pass.
+// The completion percentage is safe to derive from the returned struct:
+//
+//        pct := 0
+//        if s.Total &gt; 0 { pct = s.Completed * 100 / s.Total }
+//
+// Priority counts (HighPriority, MediumPriority, LowPriority) include both
+// pending and completed tasks so they always sum to Total.
+func (m *Manager) Stats() (Stats, error) <span class="cov2" title="4">{
+        m.mu.Lock()
+        defer m.mu.Unlock()
+
+        tasks, err := m.load()
+        if err != nil </span><span class="cov0" title="0">{
+                return Stats{}, err
+        }</span>
+
+        <span class="cov2" title="4">now := time.Now()
+        var s Stats
+        s.Total = len(tasks)
+        for _, t := range tasks </span><span class="cov4" title="10">{
+                // Completion / pending / overdue counts.
+                if t.Done </span><span class="cov1" title="2">{
+                        s.Completed++
+                }</span> else<span class="cov3" title="8"> {
+                        s.Pending++
+                        if t.IsOverdue(now) </span><span class="cov1" title="2">{
+                                s.Overdue++
+                        }</span>
+                }
+
+                // Priority breakdown — tallied regardless of done state.
+                <span class="cov4" title="10">switch t.Priority </span>{
+                case "high":<span class="cov2" title="4">
+                        s.HighPriority++</span>
+                case "medium":<span class="cov2" title="3">
+                        s.MediumPriority++</span>
+                case "low":<span class="cov2" title="3">
+                        s.LowPriority++</span>
+                }
+        }
+        <span class="cov2" title="4">return s, nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

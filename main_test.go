@@ -676,3 +676,144 @@ func TestRun_FileFlag_BeforeAndAfterConsistent(t *testing.T) {
 		t.Errorf("flag-before and flag-after do not share storage: output=%s", buf.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// run() version flag tests (Fixes #55)
+// ---------------------------------------------------------------------------
+
+// TestRun_VersionFlag verifies that --version prints the version string to w.
+func TestRun_VersionFlag(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "--version"}, buf)
+	if err != nil {
+		t.Fatalf("run --version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run --version: expected 'taskctl version' in output, got: %q", buf.String())
+	}
+}
+
+// TestRun_VersionFlagSingleDash verifies that -version prints the version string.
+func TestRun_VersionFlagSingleDash(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "-version"}, buf)
+	if err != nil {
+		t.Fatalf("run -version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run -version: expected 'taskctl version' in output, got: %q", buf.String())
+	}
+}
+
+// TestRun_VersionSubcommand verifies that the "version" subcommand prints the version string.
+func TestRun_VersionSubcommand(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "version"}, buf)
+	if err != nil {
+		t.Fatalf("run version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run version: expected 'taskctl version' in output, got: %q", buf.String())
+	}
+}
+
+// TestRun_OnlyFileFlag_NoCommand verifies that stripping --file and leaving no
+// remaining args produces a "no command specified" error.
+func TestRun_OnlyFileFlag_NoCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "--file", "tasks.json"}, newBuf())
+	if err == nil {
+		t.Fatal("run with only --file and no command: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no command specified") {
+		t.Errorf("expected 'no command specified', got: %v", err)
+	}
+}
+
+// TestRun_OnlyFileFlagEquals_NoCommand verifies equals-sign variant also triggers
+// "no command specified" when no subcommand follows.
+func TestRun_OnlyFileFlagEquals_NoCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "--file=tasks.json"}, newBuf())
+	if err == nil {
+		t.Fatal("run with only --file=... and no command: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no command specified") {
+		t.Errorf("expected 'no command specified', got: %v", err)
+	}
+}
+
+// TestRun_DoneCommand exercises the "done" case in run()'s switch.
+func TestRun_DoneCommand(t *testing.T) {
+	chdirTemp(t)
+	// Add a task first via run so we have a real ID.
+	if err := run([]string{"taskctl", "add", "Done via run"}, newBuf()); err != nil {
+		t.Fatalf("setup add: %v", err)
+	}
+	// List to get ID.
+	mgr, err := task.NewManager("tasks.json")
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	tasks, err := mgr.List("", false)
+	if err != nil || len(tasks) == 0 {
+		t.Fatalf("List: %v / len=%d", err, len(tasks))
+	}
+	id := strconv.Itoa(tasks[0].ID)
+	err = run([]string{"taskctl", "done", id}, newBuf())
+	if err != nil {
+		t.Fatalf("run done %s: unexpected error: %v", id, err)
+	}
+}
+
+// TestRun_DeleteCommand exercises the "delete" case in run()'s switch.
+func TestRun_DeleteCommand(t *testing.T) {
+	chdirTemp(t)
+	if err := run([]string{"taskctl", "add", "Delete via run"}, newBuf()); err != nil {
+		t.Fatalf("setup add: %v", err)
+	}
+	mgr, err := task.NewManager("tasks.json")
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	tasks, err := mgr.List("", false)
+	if err != nil || len(tasks) == 0 {
+		t.Fatalf("List: %v / len=%d", err, len(tasks))
+	}
+	id := strconv.Itoa(tasks[0].ID)
+	err = run([]string{"taskctl", "delete", id}, newBuf())
+	if err != nil {
+		t.Fatalf("run delete %s: unexpected error: %v", id, err)
+	}
+}
+
+// TestRun_StatsCommand exercises the "stats" case in run()'s switch.
+func TestRun_StatsCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "stats"}, newBuf())
+	if err != nil {
+		t.Fatalf("run stats: unexpected error: %v", err)
+	}
+}
+
+// TestRun_ClearCommand exercises the "clear" case in run()'s switch.
+func TestRun_ClearCommand(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "clear"}, newBuf())
+	if err != nil {
+		t.Fatalf("run clear: unexpected error: %v", err)
+	}
+}
+
+// TestRunAdd_EmptyTitleAfterTrim verifies the "title must not be empty" branch
+// when the positional args collapse to only whitespace.
+func TestRunAdd_EmptyTitleAfterTrim(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runAdd(mgr, []string{"   "}, newBuf())
+	if err == nil {
+		t.Fatal("runAdd with whitespace-only title: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("expected 'must not be empty', got: %v", err)
+	}
+}
