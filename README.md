@@ -79,30 +79,27 @@ taskctl --help
 
 A `Dockerfile` is included for containerised usage.
 
+> ⚠️ **Warning:** Each `docker run --rm` invocation starts a fresh, isolated container. Without a volume mount, **all task data is discarded when the container exits**. If you run `add` in one command and `list` in another, the second command will see an empty task list. Mount a local directory to `/data` to persist tasks across runs (see examples below).
+
 ```bash
 # Build the Docker image
 docker build -t taskctl .
 
-# Run taskctl inside a container
+# Run taskctl inside a container (stateless — no data written)
 docker run --rm taskctl --help
 
-# Add a task
-docker run --rm taskctl add "Review pull requests" --priority high
+# Add a task (persists to ./data/tasks.json on the host)
+docker run --rm -v $(pwd)/data:/data taskctl add "Review pull requests" --priority high
 
 # Add a task with a due date
-docker run --rm taskctl add "Submit report" --priority high --due 2025-12-31
+docker run --rm -v $(pwd)/data:/data taskctl add "Submit report" --priority high --due 2025-12-31
 
 # List all tasks
-docker run --rm taskctl list
+docker run --rm -v $(pwd)/data:/data taskctl list
 
 # Filter by priority
-docker run --rm taskctl list --priority high
+docker run --rm -v $(pwd)/data:/data taskctl list --priority high
 ```
-
-> **Tip:** Mount a local volume if you want tasks to persist between container runs:
-> ```bash
-> docker run --rm -v $(pwd)/data:/data taskctl list
-> ```
 
 ---
 
