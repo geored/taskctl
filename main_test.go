@@ -291,6 +291,27 @@ func TestRunDone_NonExistentID(t *testing.T) {
 		t.Fatal("runDone with non-existent ID: expected error, got nil")
 	}
 }
+func TestRunDone_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDone(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with zero ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "task ID must be a positive integer") {
+		t.Errorf("runDone zero ID: wrong error message, got: %v", err)
+	}
+}
+
+func TestRunDone_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDone(mgr, []string{"--", "-5"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with negative ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "task ID must be a positive integer") {
+		t.Errorf("runDone negative ID: wrong error message, got: %v", err)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // runDelete tests
@@ -335,6 +356,27 @@ func TestRunDelete_NonExistentID(t *testing.T) {
 	err := runDelete(mgr, []string{"9999"}, newBuf())
 	if err == nil {
 		t.Fatal("runDelete with non-existent ID: expected error, got nil")
+	}
+}
+func TestRunDelete_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDelete(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with zero ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "task ID must be a positive integer") {
+		t.Errorf("runDelete zero ID: wrong error message, got: %v", err)
+	}
+}
+
+func TestRunDelete_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDelete(mgr, []string{"--", "-5"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with negative ID: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "task ID must be a positive integer") {
+		t.Errorf("runDelete negative ID: wrong error message, got: %v", err)
 	}
 }
 
