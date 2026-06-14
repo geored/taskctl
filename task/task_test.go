@@ -13,6 +13,12 @@ import (
 // chdirTemp changes the working directory to a fresh temporary directory for
 // the duration of the test and restores the original directory on cleanup.
 // It returns the absolute path of the temporary directory.
+//
+// Only a small number of tests legitimately require chdirTemp: those that test
+// CWD-relative path resolution (NewManager's relative-path validation) or
+// symlink behaviour. All other tests should use newManager() instead, which
+// does NOT mutate the global process working directory and is safe with
+// t.Parallel().
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	orig, err := os.Getwd()
@@ -31,17 +37,15 @@ func chdirTemp(t *testing.T) string {
 	return dir
 }
 
-// newManager is a test helper that creates a Manager backed by a relative-path
-// temp file. It changes the working directory to a fresh temp dir so that the
-// relative path "tasks.json" resolves to an isolated location per test.
+// newManager is a test helper that creates a Manager backed by an isolated
+// temporary file per test. It uses t.TempDir() to obtain a per-test directory
+// and newManagerFromPath() to create the Manager directly from an absolute
+// path, without touching the global process working directory. This makes it
+// safe to call t.Parallel() in any test that uses newManager().
 func newManager(t *testing.T) *Manager {
 	t.Helper()
-	chdirTemp(t)
-	mgr, err := NewManager("tasks.json")
-	if err != nil {
-		t.Fatalf("NewManager: unexpected error: %v", err)
-	}
-	return mgr
+	dir := t.TempDir()
+	return newManagerFromPath(filepath.Join(dir, "tasks.json"))
 }
 
 // ---------------------------------------------------------------------------
@@ -51,13 +55,16 @@ func newManager(t *testing.T) *Manager {
 // TestNewManagerAbsolutePathRejected verifies that absolute paths are rejected
 // by NewManager with a clear error message.
 func TestNewManagerAbsolutePathRejected(t *testing.T) {
+	t.Parallel()
 	paths := []string{
 		"/tmp/evil.json",
 		"/etc/shadow",
 		"/",
 	}
 	for _, p := range paths {
+		p := p // capture loop variable
 		t.Run(p, func(t *testing.T) {
+			t.Parallel()
 			_, err := NewManager(p)
 			if err == nil {
 				t.Errorf("NewManager(%q): expected error for absolute path, got nil", p)
@@ -72,28 +79,39 @@ func TestNewManagerAbsolutePathRejected(t *testing.T) {
 // TestNewManagerTraversalRejected verifies that paths beginning with ".." are
 // rejected by NewManager.
 func TestNewManagerTraversalRejected(t *testing.T) {
+	t.Parallel()
 	paths := []string{
 		"../../etc/shadow",
 		"../sibling/tasks.json",
 		"..",
 	}
 	for _, p := range paths {
-		_, err := NewManager(p)
-		if err == nil {
-			t.Errorf("NewManager(%q): expected error for traversal path, got nil", p)
-		}
+		p := p // capture loop variable
+		t.Run(p, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewManager(p)
+			if err == nil {
+				t.Errorf("NewManager(%q): expected error for traversal path, got nil", p)
+			}
+		})
 	}
 }
 
 // TestNewManagerValidPath verifies that plain relative paths are accepted by
 // NewManager — both a simple filename and a subdirectory path.
+// NOTE: This test uses chdirTemp because NewManager's behaviour depends on the
+// current working directory when resolving and validating relative paths.
 func TestNewManagerValidPath(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	validPaths := []string{
 		"tasks.json",
 		"data/tasks.json",
 	}
 	for _, p := range validPaths {
+		p := p // capture loop variable
 		t.Run(p, func(t *testing.T) {
+			// Cannot be parallel: uses chdirTemp which mutates global process CWD.
+			chdirTemp(t)
 			mgr, err := NewManager(p)
 			if err != nil {
 				t.Errorf("NewManager(%q): unexpected error for valid relative path: %v", p, err)
@@ -110,6 +128,7 @@ func TestNewManagerValidPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAdd(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	if err := mgr.Add("Buy milk", "low", ""); err != nil {
 		t.Fatalf("Add: unexpected error: %v", err)
@@ -127,6 +146,7 @@ func TestAdd(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "low", "")
@@ -141,6 +161,7 @@ func TestList(t *testing.T) {
 }
 
 func TestComplete(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Finish report", "medium", "")
 
@@ -157,6 +178,7 @@ func TestComplete(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Temporary task", "medium", "")
 
@@ -173,6 +195,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestListFilterByPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("High task", "high", "")
 	_ = mgr.Add("Low task", "low", "")
@@ -196,6 +219,7 @@ func TestListFilterByPriority(t *testing.T) {
 
 // TestAddInvalidPriority verifies that Add rejects unrecognised priority values.
 func TestAddInvalidPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	tests := []string{"critical", "urgent", "", "HIGH", "Low"}
 	for _, p := range tests {
@@ -209,15 +233,20 @@ func TestAddInvalidPriority(t *testing.T) {
 // TestAddValidPriorities verifies that all three accepted priority values are
 // stored correctly.
 func TestAddValidPriorities(t *testing.T) {
+	t.Parallel()
 	for _, priority := range []string{"high", "medium", "low"} {
-		mgr := newManager(t)
-		if err := mgr.Add("Task", priority, ""); err != nil {
-			t.Errorf("Add with priority %q: unexpected error: %v", priority, err)
-		}
-		tasks, _ := mgr.List("", false)
-		if len(tasks) != 1 || tasks[0].Priority != priority {
-			t.Errorf("priority %q: stored task has priority %q", priority, tasks[0].Priority)
-		}
+		priority := priority // capture loop variable
+		t.Run(priority, func(t *testing.T) {
+			t.Parallel()
+			mgr := newManager(t)
+			if err := mgr.Add("Task", priority, ""); err != nil {
+				t.Errorf("Add with priority %q: unexpected error: %v", priority, err)
+			}
+			tasks, _ := mgr.List("", false)
+			if len(tasks) != 1 || tasks[0].Priority != priority {
+				t.Errorf("priority %q: stored task has priority %q", priority, tasks[0].Priority)
+			}
+		})
 	}
 }
 
@@ -226,6 +255,7 @@ func TestAddValidPriorities(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStatsEmpty(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	s, err := mgr.Stats()
 	if err != nil {
@@ -237,6 +267,7 @@ func TestStatsEmpty(t *testing.T) {
 }
 
 func TestStatsMixed(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "medium", "")
@@ -270,6 +301,7 @@ func TestStatsMixed(t *testing.T) {
 }
 
 func TestAddWithDueDate(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	if err := mgr.Add("Due task", "high", "2099-12-31"); err != nil {
 		t.Fatalf("Add with due date: unexpected error: %v", err)
@@ -281,6 +313,7 @@ func TestAddWithDueDate(t *testing.T) {
 }
 
 func TestAddInvalidDueDate(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	err := mgr.Add("Bad date", "medium", "not-a-date")
 	if err == nil {
@@ -289,6 +322,7 @@ func TestAddInvalidDueDate(t *testing.T) {
 }
 
 func TestAddNoDueDate(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	if err := mgr.Add("No due date", "medium", ""); err != nil {
 		t.Fatalf("Add without due date: unexpected error: %v", err)
@@ -302,6 +336,7 @@ func TestAddNoDueDate(t *testing.T) {
 // TestIsOverdue_PastDate verifies that an incomplete task with a past due date
 // is reported as overdue.
 func TestIsOverdue_PastDate(t *testing.T) {
+	t.Parallel()
 	task := Task{
 		ID:      1,
 		Title:   "Old task",
@@ -317,6 +352,7 @@ func TestIsOverdue_PastDate(t *testing.T) {
 // TestIsOverdue_FutureDate verifies that a task with a future due date is not
 // overdue.
 func TestIsOverdue_FutureDate(t *testing.T) {
+	t.Parallel()
 	task := Task{
 		ID:      2,
 		Title:   "Future task",
@@ -332,6 +368,7 @@ func TestIsOverdue_FutureDate(t *testing.T) {
 // TestIsOverdue_DoneTask verifies that a completed task is never considered
 // overdue even if its due date has passed.
 func TestIsOverdue_DoneTask(t *testing.T) {
+	t.Parallel()
 	task := Task{
 		ID:      3,
 		Title:   "Done task",
@@ -347,6 +384,7 @@ func TestIsOverdue_DoneTask(t *testing.T) {
 // TestIsOverdue_NoDueDate verifies that a task without a due date is never
 // considered overdue.
 func TestIsOverdue_NoDueDate(t *testing.T) {
+	t.Parallel()
 	task := Task{
 		ID:    4,
 		Title: "No due date",
@@ -362,6 +400,7 @@ func TestIsOverdue_NoDueDate(t *testing.T) {
 // never flagged as overdue, regardless of the local timezone. This guards
 // against the Truncate(24h) UTC-midnight bug (Fixes #58).
 func TestIsOverdue_TodayNotOverdue(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	todayStr := now.Format(dateLayout)
 	task := Task{
@@ -381,6 +420,7 @@ func TestIsOverdue_TodayNotOverdue(t *testing.T) {
 // TestIsOverdue_YesterdayIsOverdue verifies that a task due yesterday is always
 // flagged as overdue (Fixes #58).
 func TestIsOverdue_YesterdayIsOverdue(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	yesterday := now.AddDate(0, 0, -1)
 	yesterdayStr := yesterday.Format(dateLayout)
@@ -396,6 +436,7 @@ func TestIsOverdue_YesterdayIsOverdue(t *testing.T) {
 }
 
 func TestListOverdueFilter(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Overdue task", "high", "2000-01-01")
 	_ = mgr.Add("Future task", "low", "2099-01-01")
@@ -416,6 +457,7 @@ func TestListOverdueFilter(t *testing.T) {
 // TestStatsOverdue verifies that Stats.Overdue counts only incomplete tasks
 // with a past due date.
 func TestStatsOverdue(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	// 2 overdue (past date, incomplete)
@@ -445,6 +487,7 @@ func TestStatsOverdue(t *testing.T) {
 // TestStatsOverdueZeroWhenNoDueDates verifies Overdue is 0 when no tasks have
 // due dates set.
 func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "low", "")
@@ -465,6 +508,7 @@ func TestStatsOverdueZeroWhenNoDueDates(t *testing.T) {
 // TestSaveFilePermissions verifies that the tasks file is written with mode
 // 0600 (owner read/write only) after an Add operation.
 func TestSaveFilePermissions(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	if err := mgr.Add("Permission check task", "medium", ""); err != nil {
 		t.Fatalf("Add: unexpected error: %v", err)
@@ -486,6 +530,7 @@ func TestSaveFilePermissions(t *testing.T) {
 // consistent task list with no partial-write corruption. Running with -race
 // validates there are no data races in the save path.
 func TestSaveAtomicity(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	const n = 20
@@ -510,6 +555,7 @@ func TestSaveAtomicity(t *testing.T) {
 // TestCompleteNonExistentID verifies that Complete returns an error when the
 // given ID does not exist in the task store.
 func TestCompleteNonExistentID(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	// Empty store — ID 9999 cannot exist.
 	err := mgr.Complete(9999)
@@ -524,6 +570,7 @@ func TestCompleteNonExistentID(t *testing.T) {
 // TestCompleteNonExistentIDWithTasks verifies that Complete returns an error
 // when the ID does not match any task even when other tasks exist.
 func TestCompleteNonExistentIDWithTasks(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Existing task", "medium", "")
 
@@ -536,6 +583,7 @@ func TestCompleteNonExistentIDWithTasks(t *testing.T) {
 // TestDeleteNonExistentID verifies that Delete returns an error when the given
 // ID does not exist in the task store.
 func TestDeleteNonExistentID(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	// Empty store — ID 9999 cannot exist.
 	err := mgr.Delete(9999)
@@ -550,6 +598,7 @@ func TestDeleteNonExistentID(t *testing.T) {
 // TestDeleteNonExistentIDWithTasks verifies that Delete returns an error when
 // the ID does not match any task even when other tasks exist.
 func TestDeleteNonExistentIDWithTasks(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Existing task", "high", "")
 
@@ -562,6 +611,7 @@ func TestDeleteNonExistentIDWithTasks(t *testing.T) {
 // TestAddEmptyTitle verifies that Add returns an error when the title is empty
 // or consists only of whitespace.
 func TestAddEmptyTitle(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	cases := []struct {
 		name  string
@@ -573,7 +623,9 @@ func TestAddEmptyTitle(t *testing.T) {
 		{"newline only", "\n"},
 	}
 	for _, tc := range cases {
+		tc := tc // capture loop variable
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := mgr.Add(tc.title, "medium", "")
 			if err == nil {
 				t.Errorf("Add with title %q: expected error, got nil", tc.title)
@@ -585,12 +637,15 @@ func TestAddEmptyTitle(t *testing.T) {
 // TestListInvalidPriority verifies that List returns an error when called with
 // an unrecognised priority string (library-boundary validation).
 func TestListInvalidPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("A task", "medium", "")
 
 	invalidPriorities := []string{"urgent", "critical", "HIGH", "Low", "MEDIUM", "none"}
 	for _, p := range invalidPriorities {
+		p := p // capture loop variable
 		t.Run(p, func(t *testing.T) {
+			t.Parallel()
 			tasks, err := mgr.List(p, false)
 			if err == nil {
 				t.Errorf("List(%q): expected error for invalid priority, got nil (tasks=%v)", p, tasks)
@@ -605,6 +660,7 @@ func TestListInvalidPriority(t *testing.T) {
 // TestListValidPriorities verifies that List accepts all valid priority values
 // including empty string (no filter) without returning an error.
 func TestListValidPriorities(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "medium", "")
@@ -612,7 +668,9 @@ func TestListValidPriorities(t *testing.T) {
 
 	validPriorities := []string{"", "high", "medium", "low"}
 	for _, p := range validPriorities {
+		p := p // capture loop variable
 		t.Run("priority="+p, func(t *testing.T) {
+			t.Parallel()
 			tasks, err := mgr.List(p, false)
 			if err != nil {
 				t.Errorf("List(%q): unexpected error: %v", p, err)
@@ -631,6 +689,7 @@ func TestListValidPriorities(t *testing.T) {
 // TestClear_MixedTasks verifies that Clear removes all completed tasks and
 // leaves pending ones, returning correct cleared/remaining counts.
 func TestClear_MixedTasks(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	// Add 5 tasks, mark 3 done.
 	_ = mgr.Add("Task 1", "high", "")
@@ -673,6 +732,7 @@ func TestClear_MixedTasks(t *testing.T) {
 // TestClear_AllDone verifies that Clear with all tasks done returns cleared=N,
 // remaining=0, and leaves an empty task list.
 func TestClear_AllDone(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "medium", "")
@@ -706,6 +766,7 @@ func TestClear_AllDone(t *testing.T) {
 // TestClear_NoneDone verifies that Clear with no completed tasks returns
 // cleared=0, remaining=N, and leaves the task list unchanged.
 func TestClear_NoneDone(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "medium", "")
@@ -734,6 +795,7 @@ func TestClear_NoneDone(t *testing.T) {
 // TestClear_EmptyStore verifies that Clear on an empty store returns
 // cleared=0, remaining=0 without error.
 func TestClear_EmptyStore(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	cleared, remaining, err := mgr.Clear()
@@ -750,7 +812,12 @@ func TestClear_EmptyStore(t *testing.T) {
 
 // TestClear_CorruptedFile verifies that Clear returns a non-nil error when the
 // backing file is corrupt (invalid JSON) and does NOT modify the store.
+//
+// NOTE: This test uses chdirTemp because it must construct a Manager via
+// NewManager (which requires a relative path), so the CWD must be set to the
+// temp directory. It cannot safely call t.Parallel().
 func TestClear_CorruptedFile(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	dir := chdirTemp(t)
 	filePath := filepath.Join(dir, "tasks.json")
 	relPath := "tasks.json"
@@ -787,6 +854,7 @@ func TestClear_CorruptedFile(t *testing.T) {
 // TestAddIDOverflow verifies that Add returns an error when the maximum existing
 // task ID is math.MaxInt, preventing integer overflow (Fixes #70).
 func TestAddIDOverflow(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	// Manually write a task file containing a task with ID = math.MaxInt.
@@ -820,6 +888,7 @@ func TestAddIDOverflow(t *testing.T) {
 // maxTitleLength emoji runes (which are 4 bytes each) is accepted without
 // error (Fixes #69).
 func TestAddUnicodeTitleAtLimit(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	// Build a title of exactly maxTitleLength emoji runes.
@@ -835,6 +904,7 @@ func TestAddUnicodeTitleAtLimit(t *testing.T) {
 // TestAddUnicodeTitleOverLimit verifies that a title exceeding maxTitleLength
 // runes is rejected (Fixes #69).
 func TestAddUnicodeTitleOverLimit(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 
 	emoji := "😀"
@@ -849,6 +919,7 @@ func TestAddUnicodeTitleOverLimit(t *testing.T) {
 // TestClear_NoOpWhenNoneDone verifies that calling Clear() when no tasks are
 // done does not write to disk (Fixes #66).
 func TestClear_NoOpWhenNoneDone(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	_ = mgr.Add("Task A", "high", "")
 	_ = mgr.Add("Task B", "medium", "")
@@ -893,7 +964,12 @@ func TestClear_NoOpWhenNoneDone(t *testing.T) {
 // relative path that passes the ".." prefix check but resolves — via a
 // symbolic link — to a location outside the current working directory.
 // This is the defense-in-depth EvalSymlinks check (Fixes #87).
+//
+// NOTE: This test uses chdirTemp because it tests NewManager's CWD-relative
+// symlink resolution logic, which inherently requires controlling the CWD.
+// It cannot safely call t.Parallel().
 func TestNewManagerSymlinkTraversalRejected(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	// Create a fresh working directory and cd into it.
 	chdirTemp(t)
 
@@ -918,7 +994,12 @@ func TestNewManagerSymlinkTraversalRejected(t *testing.T) {
 
 // TestNewManagerSymlinkWithinCwdAccepted verifies that a symlink pointing to a
 // location *inside* the current working directory is accepted by NewManager.
+//
+// NOTE: This test uses chdirTemp because it tests NewManager's CWD-relative
+// symlink resolution logic, which inherently requires controlling the CWD.
+// It cannot safely call t.Parallel().
 func TestNewManagerSymlinkWithinCwdAccepted(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	// Create a fresh working directory and cd into it.
 	chdirTemp(t)
 

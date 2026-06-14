@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +14,11 @@ import (
 // chdirTemp changes the working directory to a fresh temporary directory for
 // the duration of the test and restores the original directory on cleanup.
 // It returns the absolute path of the temporary directory.
+//
+// Only tests that exercise the real run() CLI entry-point (which calls
+// task.NewManager with a relative path internally) need chdirTemp. All other
+// tests should use newTestManager() instead, which does not mutate the global
+// process working directory and is safe with t.Parallel().
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	orig, err := os.Getwd()
@@ -32,16 +38,14 @@ func chdirTemp(t *testing.T) string {
 }
 
 // newTestManager creates a Manager backed by a temp file isolated per test.
-// It changes the working directory to a fresh temp directory so that the
-// relative path "tasks.json" resolves to an isolated, per-test location.
+// It uses t.TempDir() to obtain a per-test directory and
+// task.NewManagerForTesting() to create the Manager directly from an absolute
+// path, without touching the global process working directory. This makes it
+// safe to call t.Parallel() in any test that uses newTestManager().
 func newTestManager(t *testing.T) *task.Manager {
 	t.Helper()
-	chdirTemp(t)
-	mgr, err := task.NewManager("tasks.json")
-	if err != nil {
-		t.Fatalf("NewManager: unexpected error: %v", err)
-	}
-	return mgr
+	dir := t.TempDir()
+	return task.NewManagerForTesting(filepath.Join(dir, "tasks.json"))
 }
 
 // newBuf returns a fresh bytes.Buffer as an io.Writer for capturing output.
@@ -54,6 +58,7 @@ func newBuf() *bytes.Buffer {
 // ---------------------------------------------------------------------------
 
 func TestRun_NoArgs(t *testing.T) {
+	t.Parallel()
 	err := run([]string{"taskctl"}, newBuf())
 	if err == nil {
 		t.Fatal("run with no args: expected error, got nil")
@@ -61,6 +66,7 @@ func TestRun_NoArgs(t *testing.T) {
 }
 
 func TestRun_UnknownCommand(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	chdirTemp(t)
 	err := run([]string{"taskctl", "frobnicate"}, newBuf())
 	if err == nil {
@@ -72,6 +78,7 @@ func TestRun_UnknownCommand(t *testing.T) {
 }
 
 func TestRun_InvalidFilePath(t *testing.T) {
+	t.Parallel()
 	// Absolute path should be rejected by NewManager.
 	err := run([]string{"taskctl", "--file", "/etc/shadow", "list"}, newBuf())
 	if err == nil {
@@ -114,6 +121,7 @@ func TestRun_FooDotDotBarAccepted(t *testing.T) {
 
 
 func TestRun_HelpFlag(t *testing.T) {
+	t.Parallel()
 	err := run([]string{"taskctl", "--help"}, newBuf())
 	if err != nil {
 		t.Fatalf("run --help: unexpected error: %v", err)
@@ -121,6 +129,7 @@ func TestRun_HelpFlag(t *testing.T) {
 }
 
 func TestRun_HFlag(t *testing.T) {
+	t.Parallel()
 	err := run([]string{"taskctl", "-h"}, newBuf())
 	if err != nil {
 		t.Fatalf("run -h: unexpected error: %v", err)
@@ -128,6 +137,7 @@ func TestRun_HFlag(t *testing.T) {
 }
 
 func TestRun_AddCommand(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	chdirTemp(t)
 	err := run([]string{"taskctl", "add", "--priority", "high", "Test task"}, newBuf())
 	if err != nil {
@@ -136,6 +146,7 @@ func TestRun_AddCommand(t *testing.T) {
 }
 
 func TestRun_FileFlag_BeforeCommand(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	chdirTemp(t)
 	err := run([]string{"taskctl", "--file", "tasks.json", "add", "Test"}, newBuf())
 	if err != nil {
@@ -144,6 +155,7 @@ func TestRun_FileFlag_BeforeCommand(t *testing.T) {
 }
 
 func TestRun_FileFlag_AfterCommand(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	chdirTemp(t)
 	err := run([]string{"taskctl", "add", "--file", "tasks.json", "Test"}, newBuf())
 	if err != nil {
@@ -156,6 +168,7 @@ func TestRun_FileFlag_AfterCommand(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRunAdd_Success(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runAdd(mgr, []string{"--priority", "high", "Buy milk"}, newBuf())
 	if err != nil {
@@ -164,6 +177,7 @@ func TestRunAdd_Success(t *testing.T) {
 }
 
 func TestRunAdd_MultiWordTitle(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runAdd(mgr, []string{"Fix the broken", "CI pipeline"}, newBuf())
 	if err != nil {
@@ -172,6 +186,7 @@ func TestRunAdd_MultiWordTitle(t *testing.T) {
 }
 
 func TestRunAdd_FlagEqualsValueSyntax(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	// --priority=low uses the flag=value syntax (requires flag.FlagSet support)
 	err := runAdd(mgr, []string{"--priority=low", "--due=2099-12-31", "Syntax test"}, newBuf())
@@ -181,6 +196,7 @@ func TestRunAdd_FlagEqualsValueSyntax(t *testing.T) {
 }
 
 func TestRunAdd_MissingTitle(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runAdd(mgr, []string{"--priority", "medium"}, newBuf())
 	if err == nil {
@@ -189,6 +205,7 @@ func TestRunAdd_MissingTitle(t *testing.T) {
 }
 
 func TestRunAdd_InvalidPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runAdd(mgr, []string{"--priority", "urgent", "My task"}, newBuf())
 	if err == nil {
@@ -197,6 +214,7 @@ func TestRunAdd_InvalidPriority(t *testing.T) {
 }
 
 func TestRunAdd_InvalidDueDate(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runAdd(mgr, []string{"--due", "not-a-date", "My task"}, newBuf())
 	if err == nil {
@@ -208,6 +226,7 @@ func TestRunAdd_InvalidDueDate(t *testing.T) {
 }
 
 func TestRunAdd_DueDateExceedsMaxLength(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	// Use a 100-character string to exceed the 10-character YYYY-MM-DD limit.
 	oversized := strings.Repeat("x", 100)
@@ -225,6 +244,7 @@ func TestRunAdd_DueDateExceedsMaxLength(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRunList_EmptyStore(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runList(mgr, []string{}, newBuf())
 	if err != nil {
@@ -233,6 +253,7 @@ func TestRunList_EmptyStore(t *testing.T) {
 }
 
 func TestRunList_WithTasks(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "high", "Task A"}, newBuf())
 	_ = runAdd(mgr, []string{"--priority", "low", "Task B"}, newBuf())
@@ -244,6 +265,7 @@ func TestRunList_WithTasks(t *testing.T) {
 }
 
 func TestRunList_FilterByPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "high", "High task"}, newBuf())
 	_ = runAdd(mgr, []string{"--priority", "low", "Low task"}, newBuf())
@@ -255,6 +277,7 @@ func TestRunList_FilterByPriority(t *testing.T) {
 }
 
 func TestRunList_FilterByPriorityEqualsValue(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority=medium", "Med task"}, newBuf())
 
@@ -265,6 +288,7 @@ func TestRunList_FilterByPriorityEqualsValue(t *testing.T) {
 }
 
 func TestRunList_InvalidPriority(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runList(mgr, []string{"--priority", "urgent"}, newBuf())
 	if err == nil {
@@ -276,6 +300,7 @@ func TestRunList_InvalidPriority(t *testing.T) {
 }
 
 func TestRunList_OverdueFlag(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--due", "2000-01-01", "--priority", "high", "Old task"}, newBuf())
 
@@ -290,6 +315,7 @@ func TestRunList_OverdueFlag(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRunDone_Success(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "medium", "Task to complete"}, newBuf())
 
@@ -308,6 +334,7 @@ func TestRunDone_Success(t *testing.T) {
 }
 
 func TestRunDone_MissingID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDone(mgr, []string{}, newBuf())
 	if err == nil {
@@ -316,6 +343,7 @@ func TestRunDone_MissingID(t *testing.T) {
 }
 
 func TestRunDone_InvalidID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDone(mgr, []string{"not-a-number"}, newBuf())
 	if err == nil {
@@ -324,6 +352,7 @@ func TestRunDone_InvalidID(t *testing.T) {
 }
 
 func TestRunDone_NonExistentID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDone(mgr, []string{"9999"}, newBuf())
 	if err == nil {
@@ -331,6 +360,7 @@ func TestRunDone_NonExistentID(t *testing.T) {
 	}
 }
 func TestRunDone_ZeroID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDone(mgr, []string{"0"}, newBuf())
 	if err == nil {
@@ -342,6 +372,7 @@ func TestRunDone_ZeroID(t *testing.T) {
 }
 
 func TestRunDone_NegativeID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDone(mgr, []string{"--", "-5"}, newBuf())
 	if err == nil {
@@ -357,6 +388,7 @@ func TestRunDone_NegativeID(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRunDelete_Success(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "low", "Task to delete"}, newBuf())
 
@@ -375,6 +407,7 @@ func TestRunDelete_Success(t *testing.T) {
 }
 
 func TestRunDelete_MissingID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDelete(mgr, []string{}, newBuf())
 	if err == nil {
@@ -383,6 +416,7 @@ func TestRunDelete_MissingID(t *testing.T) {
 }
 
 func TestRunDelete_InvalidID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDelete(mgr, []string{"abc"}, newBuf())
 	if err == nil {
@@ -391,6 +425,7 @@ func TestRunDelete_InvalidID(t *testing.T) {
 }
 
 func TestRunDelete_NonExistentID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDelete(mgr, []string{"9999"}, newBuf())
 	if err == nil {
@@ -398,6 +433,7 @@ func TestRunDelete_NonExistentID(t *testing.T) {
 	}
 }
 func TestRunDelete_ZeroID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDelete(mgr, []string{"0"}, newBuf())
 	if err == nil {
@@ -409,6 +445,7 @@ func TestRunDelete_ZeroID(t *testing.T) {
 }
 
 func TestRunDelete_NegativeID(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runDelete(mgr, []string{"--", "-5"}, newBuf())
 	if err == nil {
@@ -424,6 +461,7 @@ func TestRunDelete_NegativeID(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRunStats_EmptyStore(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	err := runStats(mgr, newBuf())
 	if err != nil {
@@ -432,6 +470,7 @@ func TestRunStats_EmptyStore(t *testing.T) {
 }
 
 func TestRunStats_WithTasks(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"}, newBuf())
 	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"}, newBuf())
@@ -452,6 +491,7 @@ func TestRunStats_WithTasks(t *testing.T) {
 // TestRunClear_HappyPath verifies that runClear prints the exact expected
 // output for a known mixture of done and pending tasks.
 func TestRunClear_HappyPath(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	// Add 4 tasks, mark 2 done.
 	_ = runAdd(mgr, []string{"--priority", "high", "Task 1"}, newBuf())
@@ -476,6 +516,7 @@ func TestRunClear_HappyPath(t *testing.T) {
 
 // TestRunClear_NothingToClear verifies the output when no tasks are done.
 func TestRunClear_NothingToClear(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 	_ = runAdd(mgr, []string{"--priority", "medium", "Pending task"}, newBuf())
 
@@ -492,6 +533,7 @@ func TestRunClear_NothingToClear(t *testing.T) {
 
 // TestRunClear_EmptyStore verifies the output when the store is empty.
 func TestRunClear_EmptyStore(t *testing.T) {
+	t.Parallel()
 	mgr := newTestManager(t)
 
 	buf := newBuf()
@@ -507,7 +549,12 @@ func TestRunClear_EmptyStore(t *testing.T) {
 
 // TestRunClear_Error verifies that runClear returns a non-nil error (wrapped
 // with "clear:") when Manager.Clear() fails due to a corrupted storage file.
+//
+// NOTE: This test uses chdirTemp because it needs to call task.NewManager
+// with a relative path (which task.NewManager requires). It cannot safely
+// call t.Parallel().
 func TestRunClear_Error(t *testing.T) {
+	// Cannot be parallel: uses chdirTemp which mutates global process CWD.
 	// Change into a fresh temp directory so we can use a relative path.
 	chdirTemp(t)
 
