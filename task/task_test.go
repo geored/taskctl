@@ -884,3 +884,60 @@ func TestClear_NoOpWhenNoneDone(t *testing.T) {
 			mtimeBefore, infoAfter.ModTime())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Symlink-based traversal tests (Issue #87)
+// ---------------------------------------------------------------------------
+
+// TestNewManagerSymlinkTraversalRejected verifies that NewManager rejects a
+// relative path that passes the ".." prefix check but resolves — via a
+// symbolic link — to a location outside the current working directory.
+// This is the defense-in-depth EvalSymlinks check (Fixes #87).
+func TestNewManagerSymlinkTraversalRejected(t *testing.T) {
+	// Create a fresh working directory and cd into it.
+	chdirTemp(t)
+
+	// Create a real "outside" target directory to point the symlink at.
+	outside := t.TempDir()
+
+	// Create a symlink inside cwd that points outside cwd.
+	if err := os.Symlink(outside, "escape_link"); err != nil {
+		t.Fatalf("Symlink: unexpected error: %v", err)
+	}
+
+	// "escape_link/tasks.json" passes the existing ".." and IsAbs checks,
+	// but should be rejected because escape_link resolves outside cwd.
+	_, err := NewManager("escape_link/tasks.json")
+	if err == nil {
+		t.Fatal("NewManager(\"escape_link/tasks.json\") with symlink pointing outside cwd: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "traversal") {
+		t.Errorf("expected error message to mention 'traversal', got: %v", err)
+	}
+}
+
+// TestNewManagerSymlinkWithinCwdAccepted verifies that a symlink pointing to a
+// location *inside* the current working directory is accepted by NewManager.
+func TestNewManagerSymlinkWithinCwdAccepted(t *testing.T) {
+	// Create a fresh working directory and cd into it.
+	chdirTemp(t)
+
+	// Create a real subdirectory inside cwd.
+	if err := os.Mkdir("subdir", 0750); err != nil {
+		t.Fatalf("Mkdir: unexpected error: %v", err)
+	}
+
+	// Create a symlink inside cwd that points to the subdir (also inside cwd).
+	if err := os.Symlink("subdir", "safe_link"); err != nil {
+		t.Fatalf("Symlink: unexpected error: %v", err)
+	}
+
+	// "safe_link/tasks.json" should be accepted — symlink resolves within cwd.
+	mgr, err := NewManager("safe_link/tasks.json")
+	if err != nil {
+		t.Errorf("NewManager(\"safe_link/tasks.json\") with symlink pointing inside cwd: unexpected error: %v", err)
+	}
+	if mgr == nil {
+		t.Error("expected non-nil *Manager, got nil")
+	}
+}

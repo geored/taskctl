@@ -41,7 +41,7 @@ type Task struct {
 //
 // Comparison is performed in UTC so that the result is consistent regardless
 // of the local timezone: a task due on date D is considered overdue only when
-// the UTC date of `now` is strictly after D.
+// the UTC date of now is strictly after D.
 func (t Task) IsOverdue(now time.Time) bool {
 	if t.Done || t.DueDate == "" {
 		return false
@@ -51,11 +51,11 @@ func (t Task) IsOverdue(now time.Time) bool {
 		log.Printf("warning: task %d has malformed due date %q: %v", t.ID, t.DueDate, err)
 		return false
 	}
-	// Normalise `now` to UTC midnight so the comparison is purely date-based
+	// Normalise now to UTC midnight so the comparison is purely date-based
 	// and is not affected by the host's local timezone.
 	nowUTC := now.UTC()
 	nowDate := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
-	// `due` is already in UTC midnight because time.Parse uses UTC when no
+	// due is already in UTC midnight because time.Parse uses UTC when no
 	// timezone is embedded in the layout/value.
 	return nowDate.After(due)
 }
@@ -75,6 +75,10 @@ type Manager struct {
 // that filePath must be a relative path that does not escape the current
 // working directory: absolute paths and paths beginning with ".." are both
 // rejected with a descriptive error.
+//
+// As defense-in-depth against symlink-based traversal (Fixes #87), the
+// resolved absolute path (after EvalSymlinks on any existing components) is
+// verified to still be rooted inside the current working directory.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 
@@ -90,7 +94,70 @@ func NewManager(filePath string) (*Manager, error) {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
 	}
 
+	// Defense-in-depth: resolve symlinks and verify the result stays within
+	// the current working directory (Fixes #87).
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("NewManager: could not determine working directory: %w", err)
+	}
+
+	joined := filepath.Join(cwd, clean)
+
+	// Attempt to resolve symlinks on the full path. If the file (or a
+	// component of its path) does not yet exist, EvalSymlinks will return an
+	// error. In that case we fall back to resolving only the existing prefix
+	// of the path so that newly-created files are still accepted while
+	// symlinks in existing parent directories are still detected.
+	resolved, err := filepath.EvalSymlinks(joined)
+	if err != nil {
+		resolved, err = evalSymlinksPartial(joined)
+		if err != nil {
+			return nil, fmt.Errorf("NewManager: cannot resolve path %q: %w", filePath, err)
+		}
+	}
+
+	// The resolved path must be rooted inside cwd (with a separator to avoid
+	// false positives where cwd is a prefix of an unrelated sibling path).
+	cwdWithSep := cwd + string(filepath.Separator)
+	if resolved != cwd && !strings.HasPrefix(resolved, cwdWithSep) {
+		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal via symlink", filePath)
+	}
+
 	return &Manager{filePath: clean}, nil
+}
+
+// evalSymlinksPartial resolves symlinks on the longest existing prefix of
+// absPath and returns the fully resolved path (existing prefix resolved +
+// non-existing suffix re-appended). absPath must be an absolute path.
+func evalSymlinksPartial(absPath string) (string, error) {
+	dir := absPath
+	suffix := ""
+
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root without finding an existing component.
+			return "", fmt.Errorf("evalSymlinksPartial: could not find existing prefix for %q", absPath)
+		}
+
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			// dir exists and is fully resolved; reattach any trailing suffix.
+			if suffix == "" {
+				return resolved, nil
+			}
+			return filepath.Join(resolved, suffix), nil
+		}
+
+		// dir does not exist yet; strip the last component into suffix.
+		base := filepath.Base(dir)
+		if suffix == "" {
+			suffix = base
+		} else {
+			suffix = filepath.Join(base, suffix)
+		}
+		dir = parent
+	}
 }
 
 // load reads all tasks from disk. It returns an empty slice when the file does
