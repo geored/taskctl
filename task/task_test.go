@@ -884,3 +884,32 @@ func TestClear_NoOpWhenNoneDone(t *testing.T) {
 			mtimeBefore, infoAfter.ModTime())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestNewManagerSymlinkEscapeRejected — Fixes #87
+// ---------------------------------------------------------------------------
+
+// TestNewManagerSymlinkEscapeRejected verifies that NewManager rejects a path
+// that, when symlinks are resolved, escapes the current working directory.
+func TestNewManagerSymlinkEscapeRejected(t *testing.T) {
+	// Create an isolated temp dir as the working directory.
+	tmpDir := chdirTemp(t)
+
+	// Create a target directory outside the working directory.
+	outsideDir := t.TempDir()
+
+	// Create a symlink inside tmpDir that points to the outside directory.
+	symlinkName := filepath.Join(tmpDir, "escape")
+	if err := os.Symlink(outsideDir, symlinkName); err != nil {
+		t.Skipf("cannot create symlink (OS restriction?): %v", err)
+	}
+
+	// "escape/tasks.json" passes the textual check but resolves outside cwd.
+	_, err := NewManager("escape/tasks.json")
+	if err == nil {
+		t.Fatal("NewManager: expected error for symlink-based path escape, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes working directory") {
+		t.Errorf("NewManager: error should mention 'escapes working directory', got: %v", err)
+	}
+}

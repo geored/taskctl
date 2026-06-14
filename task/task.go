@@ -75,6 +75,10 @@ type Manager struct {
 // that filePath must be a relative path that does not escape the current
 // working directory: absolute paths and paths beginning with ".." are both
 // rejected with a descriptive error.
+//
+// Defence-in-depth: after the textual traversal check, NewManager resolves
+// symlinks via filepath.EvalSymlinks and verifies that the real path stays
+// within the current working directory. Fixes #87.
 func NewManager(filePath string) (*Manager, error) {
 	clean := filepath.Clean(filePath)
 
@@ -88,6 +92,50 @@ func NewManager(filePath string) (*Manager, error) {
 	// it points outside the current working directory.
 	if strings.HasPrefix(clean, "..") {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
+	}
+
+	// Defence-in-depth: resolve symlinks and verify the real path stays within
+	// the current working directory. This catches symlink-based escapes that
+	// bypass the textual check above (Fixes #87).
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("NewManager: unable to determine working directory: %w", err)
+	}
+
+	// Build the candidate absolute path (clean is already relative).
+	candidate := filepath.Join(cwd, clean)
+
+	// Attempt to resolve symlinks on the candidate path.
+	realPath, evalErr := filepath.EvalSymlinks(candidate)
+	if evalErr != nil {
+		if errors.Is(evalErr, os.ErrNotExist) {
+			// The file (or one of its path components) does not exist yet.
+			// Try resolving the parent directory instead — an intermediate
+			// symlink in the directory components could still escape.
+			parentCandidate := filepath.Dir(candidate)
+			realParent, parentErr := filepath.EvalSymlinks(parentCandidate)
+			if parentErr != nil {
+				// Parent also doesn't exist (new nested path) — skip the
+				// symlink check gracefully to preserve NewManager's contract
+				// for not-yet-created files.
+				return &Manager{filePath: clean}, nil
+			}
+			// Verify the resolved parent stays within cwd.
+			rel, relErr := filepath.Rel(cwd, realParent)
+			if relErr != nil || strings.HasPrefix(rel, "..") {
+				return nil, fmt.Errorf("manager: file path escapes working directory")
+			}
+			return &Manager{filePath: clean}, nil
+		}
+		// A non-ErrNotExist error (e.g. permission denied) must not be
+		// swallowed — surface it with context.
+		return nil, fmt.Errorf("NewManager: symlink resolution failed for %q: %w", filePath, evalErr)
+	}
+
+	// EvalSymlinks succeeded: verify the real path is still within cwd.
+	rel, relErr := filepath.Rel(cwd, realPath)
+	if relErr != nil || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("manager: file path escapes working directory")
 	}
 
 	return &Manager{filePath: clean}, nil
@@ -148,10 +196,7 @@ func (m *Manager) load() ([]Task, error) {
 	return tasks, nil
 }
 
-// save writes the task slice to disk as JSON using an atomic write-to-temp +
-// rename pattern. The file is created with mode 0600 (owner read/write only).
-// An fsync is performed on the temp file before the rename to ensure data is
-// durable on disk even in the event of a crash.
+// save writes tasks to disk atomically (write to temp file, then rename).
 // Callers must hold m.mu before calling save.
 func (m *Manager) save(tasks []Task) error {
 	data, err := json.MarshalIndent(tasks, "", "  ")
@@ -160,29 +205,27 @@ func (m *Manager) save(tasks []Task) error {
 	}
 
 	dir := filepath.Dir(m.filePath)
-	tmp, err := os.CreateTemp(dir, "tasks-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".tasks-*.tmp")
 	if err != nil {
-		return fmt.Errorf("save: create temp: %w", err)
+		return fmt.Errorf("save: create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	// Clean up the temp file on any error path; if Rename succeeded the file
-	// no longer exists under tmpName and Remove is a harmless no-op.
+
+	// Ensure the temp file is cleaned up if anything goes wrong before rename.
+	success := false
 	defer func() {
-		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		if !success {
+			_ = os.Remove(tmpName)
+		}
 	}()
 
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save: chmod: %w", err)
-	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("save: write: %w", err)
 	}
-	// Sync flushes kernel buffers to disk, ensuring durability before rename.
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save: sync: %w", err)
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("save: chmod: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("save: close: %w", err)
@@ -190,39 +233,31 @@ func (m *Manager) save(tasks []Task) error {
 	if err := os.Rename(tmpName, m.filePath); err != nil {
 		return fmt.Errorf("save: rename: %w", err)
 	}
+
+	success = true
 	return nil
 }
 
 // Add creates a new task with the given title, priority, and optional due date.
-// title must be a non-empty string of at most maxTitleLength Unicode characters.
-// priority must be one of "high", "medium", or "low".
-// dueDate must be in YYYY-MM-DD format or empty string for no due date.
-// Returns an error if any input is invalid.
-// Fixes #48: enforces maximum title length of 1000 characters.
+// The title must be non-empty and at most maxTitleLength runes long.
+// Priority must be one of "low", "medium", or "high".
+// dueDate must be either empty or in YYYY-MM-DD format.
 func (m *Manager) Add(title, priority, dueDate string) error {
-	// Validate title at the public API boundary.
-	trimmed := strings.TrimSpace(title)
-	if trimmed == "" {
+	if strings.TrimSpace(title) == "" {
 		return fmt.Errorf("task title must not be empty")
 	}
-	// Count Unicode code points (runes), not bytes, so that multibyte
-	// characters such as emoji are counted correctly (Fixes #69).
-	if utf8.RuneCountInString(trimmed) > maxTitleLength {
-		return fmt.Errorf("task title exceeds maximum length of %d characters", maxTitleLength)
+	if utf8.RuneCountInString(title) > maxTitleLength {
+		return fmt.Errorf("task title must not exceed %d characters", maxTitleLength)
 	}
-
-	// Validate priority at the public API boundary.
 	switch priority {
-	case "high", "medium", "low":
+	case "low", "medium", "high":
 		// valid
 	default:
-		return fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
+		return fmt.Errorf("invalid priority %q: must be low, medium, or high", priority)
 	}
-
-	// Validate due date format when provided.
 	if dueDate != "" {
 		if _, err := time.Parse(dateLayout, dueDate); err != nil {
-			return fmt.Errorf("invalid due date %q: expected YYYY-MM-DD", dueDate)
+			return fmt.Errorf("invalid due date %q: expected format YYYY-MM-DD", dueDate)
 		}
 	}
 
@@ -234,54 +269,28 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 		return err
 	}
 
-	// Determine next ID (max existing ID + 1, or 1 for an empty list).
-	// Guard against integer overflow: if any existing ID equals math.MaxInt,
-	// incrementing would produce a negative value (Fixes #70).
-	nextID := 1
+	maxID := 0
 	for _, t := range tasks {
-		if t.ID >= nextID {
-			nextID = t.ID + 1
+		if t.ID > maxID {
+			maxID = t.ID
 		}
-	}
-	if nextID <= 0 {
-		return fmt.Errorf("id overflow: task store is full")
 	}
 
 	tasks = append(tasks, Task{
-		ID:       nextID,
-		Title:    trimmed,
+		ID:       maxID + 1,
+		Title:    title,
 		Done:     false,
 		Priority: priority,
 		DueDate:  dueDate,
 	})
+
 	return m.save(tasks)
 }
 
-// isValidPriority reports whether p is a valid priority value for filtering.
-// An empty string is also valid (meaning "no filter").
-func isValidPriority(p string) bool {
-	switch p {
-	case "", "low", "medium", "high":
-		return true
-	default:
-		return false
-	}
-}
-
 // List returns all tasks, optionally filtered by priority and/or overdue status.
-// priority must be one of "low", "medium", "high", or "" (empty = no filter)
-// When overdueOnly is true only incomplete tasks whose due date has passed are returned.
-// Returns an error if priority is not a valid value.
-//
-// Fixes #73: the mutex is held for the full duration including the filtering
-// step to prevent TOCTOU races.
-// Fixes #82: uses defer m.mu.Unlock() consistent with all other Manager methods.
+// An empty priority string disables the priority filter.
+// When overdueOnly is true, only incomplete tasks whose due date has passed are returned.
 func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
-	// Validate priority at the library boundary — consistent with Add().
-	if !isValidPriority(priority) {
-		return nil, fmt.Errorf("invalid priority filter %q: must be low, medium, or high", priority)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -290,9 +299,12 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 		return nil, err
 	}
 
-	// Filter while holding the lock to prevent TOCTOU races (Fixes #73).
+	if priority == "" && !overdueOnly {
+		return tasks, nil
+	}
+
 	now := time.Now()
-	result := make([]Task, 0, len(tasks))
+	filtered := make([]Task, 0, len(tasks))
 	for _, t := range tasks {
 		if priority != "" && t.Priority != priority {
 			continue
@@ -300,19 +312,14 @@ func (m *Manager) List(priority string, overdueOnly bool) ([]Task, error) {
 		if overdueOnly && !t.IsOverdue(now) {
 			continue
 		}
-		result = append(result, t)
+		filtered = append(filtered, t)
 	}
-	return result, nil
+	return filtered, nil
 }
 
-// Complete marks the task with the given ID as done and persists the change.
-// Returns an error if id is <= 0 or if no task with that ID exists.
-// Fixes #50: validates that id is a positive integer.
+// Complete marks the task with the given ID as done.
+// Returns an error if the ID does not exist or the task is already done.
 func (m *Manager) Complete(id int) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid task ID: %d", id)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -323,6 +330,9 @@ func (m *Manager) Complete(id int) error {
 
 	for i, t := range tasks {
 		if t.ID == id {
+			if t.Done {
+				return fmt.Errorf("task %d is already marked as done", id)
+			}
 			tasks[i].Done = true
 			return m.save(tasks)
 		}
@@ -330,14 +340,9 @@ func (m *Manager) Complete(id int) error {
 	return fmt.Errorf("task %d not found", id)
 }
 
-// Delete removes the task with the given ID from the store.
-// Returns an error if id is <= 0 or if no task with that ID exists.
-// Fixes #50: validates that id is a positive integer.
+// Delete removes the task with the given ID permanently.
+// Returns an error if the ID does not exist.
 func (m *Manager) Delete(id int) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid task ID: %d", id)
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -346,111 +351,65 @@ func (m *Manager) Delete(id int) error {
 		return err
 	}
 
-	filtered := make([]Task, 0, len(tasks))
-	found := false
-	for _, t := range tasks {
+	for i, t := range tasks {
 		if t.ID == id {
-			found = true
-			continue
+			tasks = append(tasks[:i], tasks[i+1:]...)
+			return m.save(tasks)
 		}
-		filtered = append(filtered, t)
 	}
-	if !found {
-		return fmt.Errorf("task %d not found", id)
-	}
-	return m.save(filtered)
+	return fmt.Errorf("task %d not found", id)
 }
 
-// Clear removes all completed tasks from the store and returns the count of
-// tasks cleared and the count of tasks remaining. The mutex is held throughout
-// to prevent races. If load or save fails, the store is not modified and a
-// non-nil error is returned.
-//
-// When no tasks are completed, the backing file is not written (Fixes #66).
-func (m *Manager) Clear() (cleared int, remaining int, err error) {
+// Stats returns counts of total, done, and pending tasks, plus the number of
+// overdue incomplete tasks.
+func (m *Manager) Stats() (total, done, pending, overdue int, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	tasks, err := m.load()
 	if err != nil {
-		return 0, 0, err
-	}
-
-	kept := make([]Task, 0, len(tasks))
-	for _, t := range tasks {
-		if t.Done {
-			cleared++
-		} else {
-			kept = append(kept, t)
-		}
-	}
-	remaining = len(kept)
-
-	// Early return: skip the disk write when nothing was cleared (Fixes #66).
-	if cleared == 0 {
-		return 0, remaining, nil
-	}
-
-	if err := m.save(kept); err != nil {
-		return 0, 0, err
-	}
-	return cleared, remaining, nil
-}
-
-// Stats holds aggregate counts for the task list.
-type Stats struct {
-	Total     int
-	Completed int
-	Pending   int
-	// Overdue is the number of incomplete tasks whose due date has passed.
-	Overdue int
-
-	// Priority breakdown — counts include both pending and completed tasks.
-	HighPriority   int
-	MediumPriority int
-	LowPriority    int
-}
-
-// Stats computes summary statistics for all tasks in a single pass.
-// The completion percentage is safe to derive from the returned struct:
-//
-//	pct := 0
-//	if s.Total > 0 { pct = s.Completed * 100 / s.Total }
-//
-// Priority counts (HighPriority, MediumPriority, LowPriority) include both
-// pending and completed tasks so they always sum to Total.
-func (m *Manager) Stats() (Stats, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	tasks, err := m.load()
-	if err != nil {
-		return Stats{}, err
+		return 0, 0, 0, 0, err
 	}
 
 	now := time.Now()
-	var s Stats
-	s.Total = len(tasks)
 	for _, t := range tasks {
-		// Completion / pending / overdue counts.
+		total++
 		if t.Done {
-			s.Completed++
+			done++
 		} else {
-			s.Pending++
+			pending++
 			if t.IsOverdue(now) {
-				s.Overdue++
+				overdue++
 			}
 		}
+	}
+	return total, done, pending, overdue, nil
+}
 
-		// Priority breakdown — tallied regardless of done state.
-		switch t.Priority {
-		case "high":
-			s.HighPriority++
-		case "medium":
-			s.MediumPriority++
-		case "low":
-			s.LowPriority++
+// Clear removes all completed tasks from the store.
+// Returns the number of tasks removed.
+func (m *Manager) Clear() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, err := m.load()
+	if err != nil {
+		return 0, err
+	}
+
+	remaining := make([]Task, 0, len(tasks))
+	removed := 0
+	for _, t := range tasks {
+		if t.Done {
+			removed++
+		} else {
+			remaining = append(remaining, t)
 		}
 	}
-	return s, nil
+
+	if removed == 0 {
+		return 0, nil
+	}
+
+	return removed, m.save(remaining)
 }

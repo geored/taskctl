@@ -450,3 +450,18 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
+
+// TestRunAdd_DueTooLong verifies that --due values longer than 10 characters
+// are rejected at the CLI boundary with the correct error message. Fixes #85.
+func TestRunAdd_DueTooLong(t *testing.T) {
+	mgr := newManagerForMain(t)
+	oversized := "2024-01-01-EXTRA" // 16 chars, well above the 10-char limit
+	err := runAdd(mgr, []string{"--due", oversized, "My Task"}, io.Discard)
+	if err == nil {
+		t.Fatal("runAdd: expected error for --due value longer than 10 chars, got nil")
+	}
+	const want = "add: invalid due date, expected format YYYY-MM-DD"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("runAdd: expected error %q, got: %v", want, err)
+	}
+}
