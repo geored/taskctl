@@ -2,9 +2,8 @@ package main
 
 import (
 	"bytes"
-	"fmt"
-	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -45,35 +44,14 @@ func newTestManager(t *testing.T) *task.Manager {
 	return mgr
 }
 
-// captureStdout redirects os.Stdout during fn(), returns what was printed.
-// A defer restores os.Stdout even if fn() panics.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	old := os.Stdout
-	os.Stdout = w
-	defer func() {
-		// Restore os.Stdout even on panic.
-		os.Stdout = old
-	}()
-
-	fn()
-
-	w.Close()
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("io.Copy: %v", err)
-	}
-	return buf.String()
-}
-
 // newBuf returns a fresh bytes.Buffer as an io.Writer for capturing output.
 func newBuf() *bytes.Buffer {
 	return &bytes.Buffer{}
+}
+
+// intStr converts an int to its decimal string representation.
+func intStr(n int) string {
+	return strconv.Itoa(n)
 }
 
 // ---------------------------------------------------------------------------
@@ -472,35 +450,3 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// intStr converts an int to its string representation — avoids importing strconv
-// in the test file directly.
-func intStr(n int) string {
-	return strings.TrimSpace(strings.ReplaceAll(strings.Repeat("x", n), "x", "")[0:0]) + itoa(n)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if neg {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
-}
-
-// Ensure fmt is used (captureStdout uses it indirectly via format strings).
-var _ = fmt.Sprintf
