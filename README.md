@@ -104,6 +104,12 @@ docker run --rm taskctl list --priority high
 > docker run --rm -v $(pwd)/data:/data taskctl list
 > ```
 
+> ⚠️ **Timezone note:** The Docker image is built on `scratch` and bundles the timezone database from the builder stage. All time-based comparisons (e.g., overdue detection) default to **UTC**. Override the timezone at runtime with the `TZ` environment variable:
+> ```bash
+> docker run --rm -e TZ=America/New_York taskctl list --overdue
+> ```
+> Due-date parsing uses `YYYY-MM-DD` date strings, so UTC vs. local time only affects overdue detection near midnight — a known, acceptable edge case.
+
 ---
 
 ## CLI Reference
