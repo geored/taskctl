@@ -48,7 +48,7 @@ func run(args []string, w io.Writer) error {
 		return fmt.Errorf("no command specified")
 	}
 
-	// Support top-level --help / -h before any subcommand.
+	// Support top-level --help / -h before any subcommand. Fixes #62.
 	if args[1] == "--help" || args[1] == "-h" {
 		printUsage()
 		return nil
