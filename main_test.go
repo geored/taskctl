@@ -123,14 +123,15 @@ func TestMain_UnknownCommand(t *testing.T) {
 
 func TestMain_AddAndList(t *testing.T) {
 	dir := t.TempDir()
-	fp := dir + "/tasks.json"
 
-	cmd := exec.Command(testBinary, "--file", fp, "add", "My subprocess task")
+	cmd := exec.Command(testBinary, "--file", "tasks.json", "add", "My subprocess task")
+	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("main() add: unexpected error: %v", err)
 	}
 
-	cmd2 := exec.Command(testBinary, "--file", fp, "list")
+	cmd2 := exec.Command(testBinary, "--file", "tasks.json", "list")
+	cmd2.Dir = dir
 	out, err := cmd2.Output()
 	if err != nil {
 		t.Fatalf("main() list: unexpected error: %v", err)
