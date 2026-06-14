@@ -181,6 +181,19 @@ func TestRunAdd_InvalidDueDate(t *testing.T) {
 	}
 }
 
+func TestRunAdd_DueDateExceedsMaxLength(t *testing.T) {
+	mgr := newTestManager(t)
+	// Use a 100-character string to exceed the 10-character YYYY-MM-DD limit.
+	oversized := strings.Repeat("x", 100)
+	err := runAdd(mgr, []string{"--due", oversized, "My task"}, newBuf())
+	if err == nil {
+		t.Fatal("runAdd with oversized --due value: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum length") {
+		t.Errorf("error should mention exceeds maximum length, got: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // runList tests
 // ---------------------------------------------------------------------------
