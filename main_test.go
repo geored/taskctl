@@ -450,3 +450,53 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Issue #81: runDone / runDelete must reject zero and negative IDs at CLI layer
+// ---------------------------------------------------------------------------
+
+func TestRunDone_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDone(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with ID=0: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "done: task ID must be a positive integer") {
+		t.Errorf("runDone zero ID: wrong error: %v", err)
+	}
+}
+
+func TestRunDone_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	// Use "--" to stop flag parsing so "-5" is treated as a positional arg.
+	err := runDone(mgr, []string{"--", "-5"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with ID=-5: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "done: task ID must be a positive integer") {
+		t.Errorf("runDone negative ID: wrong error: %v", err)
+	}
+}
+
+func TestRunDelete_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDelete(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with ID=0: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "delete: task ID must be a positive integer") {
+		t.Errorf("runDelete zero ID: wrong error: %v", err)
+	}
+}
+
+func TestRunDelete_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	// Use "--" to stop flag parsing so "-3" is treated as a positional arg.
+	err := runDelete(mgr, []string{"--", "-3"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with ID=-3: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "delete: task ID must be a positive integer") {
+		t.Errorf("runDelete negative ID: wrong error: %v", err)
+	}
+}
