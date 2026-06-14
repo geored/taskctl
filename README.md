@@ -20,6 +20,7 @@
   - [done](#done)
   - [delete](#delete)
   - [stats](#stats)
+  - [clear](#clear)
 - [Examples](#examples)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -43,6 +44,7 @@
 | ✅ **Complete tasks** | Mark a task as done by its ID |
 | 🗑️ **Delete tasks** | Remove a task permanently by its ID |
 | 📊 **Task statistics** | View total, pending, completed, overdue counts and completion rate with `stats` |
+| 🧹 **Clear completed** | Remove all completed tasks in one go with `clear` |
 | 📅 **Due dates** | Attach an optional due date (YYYY-MM-DD) to any task with `--due` |
 | ⚠️ **Overdue detection** | Tasks past their due date are flagged `[OVERDUE]`; filter with `--overdue` |
 
@@ -261,6 +263,30 @@ Completion rate: 41%
 - Priority counts (`High priority`, `Med priority`, `Low priority`) include both pending and completed tasks so they always sum to the total.
 
 ---
+
+---
+
+### `clear`
+
+Remove all completed tasks (tasks marked done via `taskctl done <id>`) from the task list in one operation.
+
+```
+taskctl clear
+```
+
+No flags are accepted — `clear` always removes all completed tasks.
+
+**Example output:**
+
+```
+Cleared 3 completed tasks. 4 tasks remaining.
+```
+
+**Notes:**
+
+- Only tasks with `Done = true` are removed; pending tasks are unaffected.
+- If there are no completed tasks, the command reports `Cleared 0 completed tasks.`
+
 
 ## Examples
 
