@@ -505,3 +505,67 @@ func TestRunClear_Error(t *testing.T) {
 		t.Errorf("runClear error should be wrapped with \"clear:\", got: %v", runErr)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Issue #81 — runDone and runDelete: non-positive ID validation
+// ---------------------------------------------------------------------------
+
+// TestRunDone_ZeroID verifies that ID=0 is rejected at the CLI boundary with
+// a clear "must be a positive integer" message (Fixes #81).
+func TestRunDone_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDone(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with ID=0: expected error, got nil")
+	}
+	const want = "done: task ID must be a positive integer"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("runDone(0) error = %q; want substring %q", err.Error(), want)
+	}
+}
+
+// TestRunDone_NegativeID verifies that a negative ID is rejected at the CLI
+// boundary. Go's flag package intercepts bare negative numbers (e.g. "-5") as
+// unknown flags before strconv.Atoi is reached, so the resulting error message
+// differs from the zero case; we assert only that an error is returned and
+// that it is prefixed with "done:" for consistency (Fixes #81).
+func TestRunDone_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDone(mgr, []string{"-5"}, newBuf())
+	if err == nil {
+		t.Fatal("runDone with ID=-5: expected error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "done:") {
+		t.Errorf("runDone(-5) error = %q; want prefix \"done:\"", err.Error())
+	}
+}
+
+// TestRunDelete_ZeroID verifies that ID=0 is rejected at the CLI boundary
+// with a clear "must be a positive integer" message (Fixes #81).
+func TestRunDelete_ZeroID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDelete(mgr, []string{"0"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with ID=0: expected error, got nil")
+	}
+	const want = "delete: task ID must be a positive integer"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("runDelete(0) error = %q; want substring %q", err.Error(), want)
+	}
+}
+
+// TestRunDelete_NegativeID verifies that a negative ID is rejected at the CLI
+// boundary. Go's flag package intercepts bare negative numbers (e.g. "-5") as
+// unknown flags before strconv.Atoi is reached, so the resulting error message
+// differs from the zero case; we assert only that an error is returned and
+// that it is prefixed with "delete:" for consistency (Fixes #81).
+func TestRunDelete_NegativeID(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runDelete(mgr, []string{"-5"}, newBuf())
+	if err == nil {
+		t.Fatal("runDelete with ID=-5: expected error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "delete:") {
+		t.Errorf("runDelete(-5) error = %q; want prefix \"delete:\"", err.Error())
+	}
+}
