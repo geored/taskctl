@@ -707,3 +707,72 @@ func TestRun_FileFlag_BeforeAndAfterConsistent(t *testing.T) {
 		t.Errorf("flag-before and flag-after do not share storage: output=%s", buf.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Uncovered run() branches: version flag/subcommand, no-command-after-file
+// ---------------------------------------------------------------------------
+
+// TestRun_VersionFlag verifies that `taskctl --version` prints version info
+// and returns nil (no error). Fixes #55.
+func TestRun_VersionFlag(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "--version"}, buf)
+	if err != nil {
+		t.Fatalf("run --version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run --version: expected output to contain 'taskctl version', got: %q", buf.String())
+	}
+}
+
+// TestRun_VersionFlagSingleDash verifies that `taskctl -version` also works.
+func TestRun_VersionFlagSingleDash(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "-version"}, buf)
+	if err != nil {
+		t.Fatalf("run -version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run -version: expected output to contain 'taskctl version', got: %q", buf.String())
+	}
+}
+
+// TestRun_VersionSubcommand verifies that `taskctl version` prints version
+// info and returns nil. Fixes #55 / #74.
+func TestRun_VersionSubcommand(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "version"}, buf)
+	if err != nil {
+		t.Fatalf("run version: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "taskctl version") {
+		t.Errorf("run version: expected output to contain 'taskctl version', got: %q", buf.String())
+	}
+}
+
+// TestRun_NoCommandAfterFileFlag verifies that stripping --file <val> and
+// leaving no remaining args produces a "no command specified" error. Fixes #55.
+func TestRun_NoCommandAfterFileFlag(t *testing.T) {
+	chdirTemp(t)
+	// After pre-scan strips "--file tasks.json", remaining is empty → error.
+	err := run([]string{"taskctl", "--file", "tasks.json"}, newBuf())
+	if err == nil {
+		t.Fatal("run --file <val> with no subcommand: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no command specified") {
+		t.Errorf("expected 'no command specified' error, got: %v", err)
+	}
+}
+
+// TestRun_NoCommandAfterFileFlagEqualsSign verifies the equals-sign variant
+// also leaves remaining empty and returns "no command specified".
+func TestRun_NoCommandAfterFileFlagEqualsSign(t *testing.T) {
+	chdirTemp(t)
+	err := run([]string{"taskctl", "--file=tasks.json"}, newBuf())
+	if err == nil {
+		t.Fatal("run --file=<val> with no subcommand: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no command specified") {
+		t.Errorf("expected 'no command specified' error, got: %v", err)
+	}
+}
