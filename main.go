@@ -165,10 +165,11 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	}
 
 	// Validate the --due flag value at the CLI boundary before calling the library.
-	// Fixes #32: return a user-friendly error with the expected format substring.
+	// Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
+	// so that the substring is unambiguous for both users and tests.
 	if *due != "" {
 		if _, err := time.Parse("2006-01-02", *due); err != nil {
-			return fmt.Errorf("add: invalid due date format, expected YYYY-MM-DD")
+			return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
 		}
 	}
 
