@@ -1,0 +1,450 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>taskctl: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/geored/taskctl/main.go (90.4%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "flag"
+        "fmt"
+        "io"
+        "log"
+        "os"
+        "strconv"
+        "strings"
+        "time"
+
+        "github.com/geored/taskctl/task"
+)
+
+// version is set at build time via -ldflags "-X main.version=&lt;tag&gt;".
+// Fixes #74: support taskctl --version and taskctl version.
+var version = "dev"
+
+// maxFilePathLen is the maximum allowed length for the --file flag value.
+// Fixes #76: reject excessively long file paths.
+const maxFilePathLen = 4096
+
+// maxDueDateLen is the maximum allowed length for the --due flag value.
+// YYYY-MM-DD is exactly 10 characters.
+// Fixes #85: reject excessively long due date strings before time.Parse.
+const maxDueDateLen = 10
+
+func init() <span class="cov8" title="1">{
+        // Remove the default timestamp prefix from log messages so that the CLI
+        // output is clean; the caller sees only the message itself.
+        log.SetFlags(0)
+}</span>
+
+func main() <span class="cov0" title="0">{
+        if err := run(os.Args, os.Stdout); err != nil </span><span class="cov0" title="0">{
+                log.Print(err)
+                os.Exit(1)
+        }</span>
+}
+
+// run is the testable entry-point for the CLI. args is the full argument list
+// (including the program name at index 0). w receives any output that would
+// normally go to stdout.
+func run(args []string, w io.Writer) error <span class="cov8" title="1">{
+        if len(args) &lt; 2 </span><span class="cov8" title="1">{
+                printUsage()
+                return fmt.Errorf("no command specified")
+        }</span>
+
+        // Support top-level --help / -h before any subcommand.
+        <span class="cov8" title="1">if args[1] == "--help" || args[1] == "-h" </span><span class="cov8" title="1">{
+                printUsage()
+                return nil
+        }</span>
+
+        // Support --version / version subcommand. Fixes #74.
+        <span class="cov8" title="1">if args[1] == "--version" || args[1] == "-version" || args[1] == "version" </span><span class="cov8" title="1">{
+                fmt.Fprintf(w, "taskctl version %s\n", version)
+                return nil
+        }</span>
+
+        // Parse the top-level --file flag, which may appear before or after the
+        // subcommand. We do a quick pre-scan for --file / --file=&lt;val&gt; so that
+        // `taskctl --file x.json add ...` works as well as `taskctl add --file x.json ...`.
+        <span class="cov8" title="1">filePath := "tasks.json"
+        remaining := args[1:]
+        for i := 0; i &lt; len(remaining); i++ </span><span class="cov8" title="1">{
+                a := remaining[i]
+                if a == "--file" || a == "-file" </span><span class="cov8" title="1">{
+                        if i+1 &lt; len(remaining) </span><span class="cov8" title="1">{
+                                filePath = remaining[i+1]
+                                remaining = append(remaining[:i], remaining[i+2:]...)
+                                i--
+                        }</span>
+                } else<span class="cov8" title="1"> if strings.HasPrefix(a, "--file=") </span><span class="cov8" title="1">{
+                        filePath = strings.TrimPrefix(a, "--file=")
+                        remaining = append(remaining[:i], remaining[i+1:]...)
+                        i--
+                }</span> else<span class="cov8" title="1"> if strings.HasPrefix(a, "-file=") </span><span class="cov8" title="1">{
+                        filePath = strings.TrimPrefix(a, "-file=")
+                        remaining = append(remaining[:i], remaining[i+1:]...)
+                        i--
+                }</span>
+        }
+
+        // Validate --file path length. Fixes #76.
+        <span class="cov8" title="1">if len(filePath) &gt; maxFilePathLen </span><span class="cov8" title="1">{
+                return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
+        }</span>
+
+        // Fixes #83: path traversal and absolute-path validation is delegated
+        // entirely to NewManager, which uses filepath.Clean + IsAbs + HasPrefix
+        // checks as the single authoritative layer. We do not duplicate that logic
+        // here so there is no risk of the two checks diverging.
+
+        <span class="cov8" title="1">if len(remaining) == 0 </span><span class="cov8" title="1">{
+                printUsage()
+                return fmt.Errorf("no command specified")
+        }</span>
+
+        <span class="cov8" title="1">cmd := remaining[0]
+        cmdArgs := remaining[1:]
+
+        mgr, err := task.NewManager(filePath)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to initialise task manager: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">switch cmd </span>{
+        case "add":<span class="cov8" title="1">
+                return runAdd(mgr, cmdArgs, w)</span>
+        case "list":<span class="cov8" title="1">
+                return runList(mgr, cmdArgs, w)</span>
+        case "done":<span class="cov0" title="0">
+                return runDone(mgr, cmdArgs, w)</span>
+        case "delete":<span class="cov0" title="0">
+                return runDelete(mgr, cmdArgs, w)</span>
+        case "stats":<span class="cov0" title="0">
+                return runStats(mgr, w)</span>
+        case "clear":<span class="cov0" title="0">
+                return runClear(mgr, w)</span>
+        default:<span class="cov8" title="1">
+                printUsage()
+                return fmt.Errorf("unknown command: %s", cmd)</span>
+        }
+}
+
+// printUsage writes a short help message to stderr.
+func printUsage() <span class="cov8" title="1">{
+        fmt.Fprintln(os.Stderr, `Usage: taskctl [--file &lt;path&gt;] &lt;command&gt; [options]
+
+Global flags:
+  --file &lt;path&gt;   Path to the tasks JSON file (default: tasks.json)
+  --version       Print the version string and exit
+  --help, -h      Show this help message
+
+Commands:
+  add     [--priority &lt;low|medium|high&gt;] [--due YYYY-MM-DD] &lt;title&gt;
+  list    [--priority &lt;low|medium|high&gt;] [--overdue]
+  done    &lt;id&gt;
+  delete  &lt;id&gt;
+  stats
+  clear   Remove all completed (done) tasks
+  version Print the version string`)
+}</span>
+
+// runAdd handles the "add" sub-command.
+// Flags: --priority (default "medium"), --due (optional, YYYY-MM-DD).
+// Remaining args after flag parsing are joined as the task title.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runAdd(mgr *task.Manager, args []string, w io.Writer) error <span class="cov8" title="1">{
+        fs := flag.NewFlagSet("add", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        priority := fs.String("priority", "medium", "Task priority: low, medium, high")
+        due := fs.String("due", "", "Optional due date in YYYY-MM-DD format")
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("add: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if fs.NArg() == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("add: task title is required")
+        }</span>
+
+        // Join remaining positional arguments as the title so that users do not
+        // need to quote multi-word titles.
+        <span class="cov8" title="1">title := strings.TrimSpace(strings.Join(fs.Args(), " "))
+        if title == "" </span><span class="cov0" title="0">{
+                return fmt.Errorf("add: task title must not be empty")
+        }</span>
+
+        // Validate the --due flag value at the CLI boundary before calling the library.
+        // Fixes #85: reject oversized input before time.Parse is called.
+        // Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
+        // so that the substring is unambiguous for both users and tests.
+        <span class="cov8" title="1">if *due != "" </span><span class="cov8" title="1">{
+                if len(*due) &gt; maxDueDateLen </span><span class="cov8" title="1">{
+                        return fmt.Errorf("add: --due value exceeds maximum length of %d characters", maxDueDateLen)
+                }</span>
+                <span class="cov8" title="1">if _, err := time.Parse("2006-01-02", *due); err != nil </span><span class="cov8" title="1">{
+                        return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
+                }</span>
+        }
+
+        <span class="cov8" title="1">if err := mgr.Add(title, *priority, *due); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("add: %w", err)
+        }</span>
+        <span class="cov8" title="1">fmt.Fprintln(w, "Task added.")
+        return nil</span>
+}
+
+// runList handles the "list" sub-command.
+// Flags: --priority (filter by priority), --overdue (show only overdue tasks).
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runList(mgr *task.Manager, args []string, w io.Writer) error <span class="cov8" title="1">{
+        fs := flag.NewFlagSet("list", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        priority := fs.String("priority", "", "Filter by priority: low, medium, high")
+        overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("list: %w", err)
+        }</span>
+
+        // Validate the --priority flag value at the CLI boundary.
+        <span class="cov8" title="1">if *priority != "" </span><span class="cov8" title="1">{
+                switch *priority </span>{
+                case "low", "medium", "high":<span class="cov8" title="1"></span>
+                        // valid
+                default:<span class="cov8" title="1">
+                        return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)</span>
+                }
+        }
+
+        <span class="cov8" title="1">tasks, err := mgr.List(*priority, *overdueOnly)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("list: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if len(tasks) == 0 </span><span class="cov8" title="1">{
+                fmt.Fprintln(w, "No tasks found.")
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">now := time.Now()
+
+        // Header
+        fmt.Fprintf(w, "%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
+        fmt.Fprintln(w, "------------------------------------------------------")
+
+        for _, t := range tasks </span><span class="cov8" title="1">{
+                done := "[ ]"
+                if t.Done </span><span class="cov0" title="0">{
+                        done = "[x]"
+                }</span>
+
+                <span class="cov8" title="1">due := t.DueDate
+                if due == "" </span><span class="cov8" title="1">{
+                        due = "-"
+                }</span>
+
+                // Append an [OVERDUE] marker for incomplete tasks past their due date.
+                <span class="cov8" title="1">title := t.Title
+                if t.IsOverdue(now) </span><span class="cov8" title="1">{
+                        title += " [OVERDUE]"
+                }</span>
+
+                <span class="cov8" title="1">fmt.Fprintf(w, "%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)</span>
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+
+// runDone handles the "done" sub-command.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDone(mgr *task.Manager, args []string, w io.Writer) error <span class="cov8" title="1">{
+        fs := flag.NewFlagSet("done", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("done: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if fs.NArg() == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("done: task ID is required")
+        }</span>
+        <span class="cov8" title="1">id, err := strconv.Atoi(fs.Arg(0))
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("done: invalid task ID: %s", fs.Arg(0))
+        }</span>
+        // Fixes #81: reject non-positive IDs at the CLI boundary.
+        <span class="cov8" title="1">if id &lt;= 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("done: task ID must be a positive integer")
+        }</span>
+        <span class="cov8" title="1">if err := mgr.Complete(id); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("done: %w", err)
+        }</span>
+        <span class="cov8" title="1">fmt.Fprintf(w, "Task %d marked as done.\n", id)
+        return nil</span>
+}
+
+// runDelete handles the "delete" sub-command.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runDelete(mgr *task.Manager, args []string, w io.Writer) error <span class="cov8" title="1">{
+        fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+        fs.SetOutput(os.Stderr)
+        if err := fs.Parse(args); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("delete: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if fs.NArg() == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("delete: task ID is required")
+        }</span>
+        <span class="cov8" title="1">id, err := strconv.Atoi(fs.Arg(0))
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("delete: invalid task ID: %s", fs.Arg(0))
+        }</span>
+        // Fixes #81: reject non-positive IDs at the CLI boundary.
+        <span class="cov8" title="1">if id &lt;= 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("delete: task ID must be a positive integer")
+        }</span>
+        <span class="cov8" title="1">if err := mgr.Delete(id); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("delete: %w", err)
+        }</span>
+        <span class="cov8" title="1">fmt.Fprintf(w, "Task %d deleted.\n", id)
+        return nil</span>
+}
+
+// runStats handles the "stats" sub-command.
+// It prints a summary that includes completion counts, overdue count,
+// per-priority task counts, and the overall completion rate.
+// Returns an error instead of calling os.Exit, enabling unit testing.
+func runStats(mgr *task.Manager, w io.Writer) error <span class="cov8" title="1">{
+        s, err := mgr.Stats()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("stats: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">pct := 0
+        if s.Total &gt; 0 </span><span class="cov8" title="1">{
+                pct = s.Completed * 100 / s.Total
+        }</span>
+
+        <span class="cov8" title="1">fmt.Fprintf(w, "Total tasks:     %d\n", s.Total)
+        fmt.Fprintf(w, "  Pending:       %d\n", s.Pending)
+        fmt.Fprintf(w, "  Completed:     %d\n", s.Completed)
+        fmt.Fprintf(w, "  Overdue:       %d\n", s.Overdue)
+        fmt.Fprintf(w, "  High priority: %d\n", s.HighPriority)
+        fmt.Fprintf(w, "  Med priority:  %d\n", s.MediumPriority)
+        fmt.Fprintf(w, "  Low priority:  %d\n", s.LowPriority)
+        fmt.Fprintf(w, "Completion rate: %d%%\n", pct)
+        return nil</span>
+}
+
+// runClear handles the "clear" sub-command.
+// It removes all tasks marked as done and prints how many were cleared and
+// how many tasks remain. Returns an error instead of calling os.Exit so that
+// the caller (main) controls the exit code and tests can capture errors.
+func runClear(mgr *task.Manager, w io.Writer) error <span class="cov8" title="1">{
+        cleared, remaining, err := mgr.Clear()
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("clear: %w", err)
+        }</span>
+        <span class="cov8" title="1">clearedWord := "tasks"
+        if cleared == 1 </span><span class="cov0" title="0">{ clearedWord = "task" }</span>
+        <span class="cov8" title="1">remainingWord := "tasks"
+        if remaining == 1 </span><span class="cov8" title="1">{ remainingWord = "task" }</span>
+        <span class="cov8" title="1">fmt.Fprintf(w, "Cleared %d completed %s. %d %s remaining.\n", cleared, clearedWord, remaining, remainingWord)
+        return nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

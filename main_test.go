@@ -776,3 +776,123 @@ func TestRun_NoCommandAfterFileFlagEqualsSign(t *testing.T) {
 		t.Errorf("expected 'no command specified' error, got: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// run() integration tests for done/delete/stats/clear subcommands (Fixes #55)
+// These cover the switch-case dispatch lines in run() that were previously
+// only tested via direct runXxx() calls, leaving the switch arms uncovered.
+// ---------------------------------------------------------------------------
+
+// TestRun_DoneSubcommand exercises the "done" switch arm in run().
+func TestRun_DoneSubcommand(t *testing.T) {
+	chdirTemp(t)
+	// Add a task first.
+	if err := run([]string{"taskctl", "add", "Done subcommand task"}, newBuf()); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	mgr, _ := task.NewManager("tasks.json")
+	tasks, _ := mgr.List("", false)
+	id := strconv.Itoa(tasks[0].ID)
+
+	err := run([]string{"taskctl", "done", id}, newBuf())
+	if err != nil {
+		t.Fatalf("run done: unexpected error: %v", err)
+	}
+}
+
+// TestRun_DeleteSubcommand exercises the "delete" switch arm in run().
+func TestRun_DeleteSubcommand(t *testing.T) {
+	chdirTemp(t)
+	if err := run([]string{"taskctl", "add", "Delete subcommand task"}, newBuf()); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	mgr, _ := task.NewManager("tasks.json")
+	tasks, _ := mgr.List("", false)
+	id := strconv.Itoa(tasks[0].ID)
+
+	err := run([]string{"taskctl", "delete", id}, newBuf())
+	if err != nil {
+		t.Fatalf("run delete: unexpected error: %v", err)
+	}
+}
+
+// TestRun_StatsSubcommand exercises the "stats" switch arm in run().
+func TestRun_StatsSubcommand(t *testing.T) {
+	chdirTemp(t)
+	if err := run([]string{"taskctl", "add", "Stats subcommand task"}, newBuf()); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	buf := newBuf()
+	err := run([]string{"taskctl", "stats"}, buf)
+	if err != nil {
+		t.Fatalf("run stats: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Total tasks") {
+		t.Errorf("run stats: expected 'Total tasks' in output, got: %q", buf.String())
+	}
+}
+
+// TestRun_ClearSubcommand exercises the "clear" switch arm in run().
+func TestRun_ClearSubcommand(t *testing.T) {
+	chdirTemp(t)
+	if err := run([]string{"taskctl", "add", "Clear subcommand task"}, newBuf()); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	buf := newBuf()
+	err := run([]string{"taskctl", "clear"}, buf)
+	if err != nil {
+		t.Fatalf("run clear: unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Missing branch coverage: runAdd empty-after-trim, runList display [x],
+// runAdd/runDone/runDelete/runStats/runClear error paths, runClear singular
+// ---------------------------------------------------------------------------
+
+// TestRunAdd_WhitespaceTitleOnly covers the "title must not be empty" branch
+// after TrimSpace produces an empty string.
+func TestRunAdd_WhitespaceTitleOnly(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runAdd(mgr, []string{"   "}, newBuf())
+	if err == nil {
+		t.Fatal("runAdd with whitespace-only title: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "title must not be empty") {
+		t.Errorf("wrong error: %v", err)
+	}
+}
+
+// TestRunList_DisplaysDoneMarker covers the "[x]" branch in runList display loop.
+func TestRunList_DisplaysDoneMarker(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Done task"}, newBuf())
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[0].ID)
+
+	buf := newBuf()
+	err := runList(mgr, []string{}, buf)
+	if err != nil {
+		t.Fatalf("runList: unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "[x]") {
+		t.Errorf("runList: expected '[x]' marker for done task, got: %q", buf.String())
+	}
+}
+
+// TestRunClear_SingularTask covers the "task" (singular) branch in runClear.
+func TestRunClear_SingularTask(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "medium", "Solo task"}, newBuf())
+	tasks, _ := mgr.List("", false)
+	_ = mgr.Complete(tasks[0].ID)
+
+	buf := newBuf()
+	if err := runClear(mgr, buf); err != nil {
+		t.Fatalf("runClear singular: unexpected error: %v", err)
+	}
+	want := "Cleared 1 completed task. 0 tasks remaining.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("runClear singular:\n  got:  %q\n  want: %q", got, want)
+	}
+}
