@@ -521,3 +521,62 @@ func (m *Manager) Stats() (Stats, error) {
 	}
 	return s, nil
 }
+
+// AddAndReturnID creates a new task identical to Add but also returns the
+// assigned task ID on success.  It is provided for callers (e.g. the CLI
+// runAdd handler) that need to echo the ID back to the user.
+func (m *Manager) AddAndReturnID(title, priority, dueDate string) (int, error) {
+	// Validate title at the public API boundary.
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return 0, fmt.Errorf("task title must not be empty")
+	}
+	if utf8.RuneCountInString(trimmed) > maxTitleLength {
+		return 0, fmt.Errorf("task title exceeds maximum length of %d characters", maxTitleLength)
+	}
+
+	// Validate priority at the public API boundary.
+	switch priority {
+	case "high", "medium", "low":
+		// valid
+	default:
+		return 0, fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
+	}
+
+	// Validate due date format when provided.
+	if dueDate != "" {
+		if _, err := time.Parse(dateLayout, dueDate); err != nil {
+			return 0, fmt.Errorf("invalid due date %q: expected YYYY-MM-DD", dueDate)
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tasks, err := m.load()
+	if err != nil {
+		return 0, err
+	}
+
+	nextID := 1
+	for _, t := range tasks {
+		if t.ID >= nextID {
+			nextID = t.ID + 1
+		}
+	}
+	if nextID <= 0 {
+		return 0, fmt.Errorf("id overflow: task store is full")
+	}
+
+	tasks = append(tasks, Task{
+		ID:       nextID,
+		Title:    trimmed,
+		Done:     false,
+		Priority: priority,
+		DueDate:  dueDate,
+	})
+	if err := m.save(tasks); err != nil {
+		return 0, err
+	}
+	return nextID, nil
+}
