@@ -83,26 +83,21 @@ A `Dockerfile` is included for containerised usage.
 # Build the Docker image
 docker build -t taskctl .
 
-# Run taskctl inside a container
+# Run taskctl inside a container (stateless — no volume needed)
 docker run --rm taskctl --help
 
-# Add a task
-docker run --rm taskctl add "Review pull requests" --priority high
+# Add a task (mounts ./data on the host to /data in the container for persistence)
+docker run --rm -v $(pwd)/data:/data taskctl --file /data/tasks.json add "Review pull requests" --priority high
 
 # Add a task with a due date
-docker run --rm taskctl add "Submit report" --priority high --due 2025-12-31
+docker run --rm -v $(pwd)/data:/data taskctl --file /data/tasks.json add "Submit report" --priority high --due 2025-12-31
 
 # List all tasks
-docker run --rm taskctl list
+docker run --rm -v $(pwd)/data:/data taskctl --file /data/tasks.json list
 
 # Filter by priority
-docker run --rm taskctl list --priority high
+docker run --rm -v $(pwd)/data:/data taskctl --file /data/tasks.json list --priority high
 ```
-
-> **Tip:** Mount a local volume if you want tasks to persist between container runs:
-> ```bash
-> docker run --rm -v $(pwd)/data:/data taskctl list
-> ```
 
 ---
 
