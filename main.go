@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -85,16 +84,10 @@ func run(args []string, w io.Writer) error {
 		return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
 	}
 
-	// Fixes #83: Use filepath.Clean + HasPrefix check to detect directory
-	// traversal consistently with NewManager's own validation. The simple
-	// strings.Contains("..") check was weaker (e.g. "foo..bar" would be
-	// rejected unnecessarily). We delegate the authoritative check to
-	// NewManager below; this pre-check aligns with the same logic so both
-	// layers are equivalent.
-	cleanedPath := filepath.Clean(filePath)
-	if filepath.IsAbs(cleanedPath) || strings.HasPrefix(cleanedPath, "..") {
-		return fmt.Errorf("--file path must not escape the working directory: %q", filePath)
-	}
+	// Fixes #83: path traversal and absolute-path validation is delegated
+	// entirely to NewManager, which uses filepath.Clean + IsAbs + HasPrefix
+	// checks as the single authoritative layer. We do not duplicate that logic
+	// here so there is no risk of the two checks diverging.
 
 	if len(remaining) == 0 {
 		printUsage()
@@ -175,7 +168,7 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	// Fixes #32: return a user-friendly error with the expected format substring.
 	if *due != "" {
 		if _, err := time.Parse("2006-01-02", *due); err != nil {
-			return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
+			return fmt.Errorf("add: invalid due date format, expected YYYY-MM-DD")
 		}
 	}
 
