@@ -7,7 +7,7 @@ github.com/geored/taskctl/main.go:46.19,49.3 2 1
 github.com/geored/taskctl/main.go:52.2,52.44 1 1
 github.com/geored/taskctl/main.go:52.44,55.3 2 1
 github.com/geored/taskctl/main.go:58.2,58.77 1 1
-github.com/geored/taskctl/main.go:58.77,61.3 2 0
+github.com/geored/taskctl/main.go:58.77,61.3 2 1
 github.com/geored/taskctl/main.go:66.2,68.38 3 1
 github.com/geored/taskctl/main.go:68.38,70.36 2 1
 github.com/geored/taskctl/main.go:70.36,71.28 1 1
@@ -19,7 +19,7 @@ github.com/geored/taskctl/main.go:80.44,84.4 3 1
 github.com/geored/taskctl/main.go:88.2,88.36 1 1
 github.com/geored/taskctl/main.go:88.36,90.3 1 1
 github.com/geored/taskctl/main.go:97.2,97.25 1 1
-github.com/geored/taskctl/main.go:97.25,100.3 2 0
+github.com/geored/taskctl/main.go:97.25,100.3 2 1
 github.com/geored/taskctl/main.go:102.2,106.16 4 1
 github.com/geored/taskctl/main.go:106.16,108.3 1 1
 github.com/geored/taskctl/main.go:110.2,110.13 1 1
