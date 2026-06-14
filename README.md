@@ -279,8 +279,6 @@ Completion rate: 41%
 
 ---
 
----
-
 ### `clear`
 
 Remove all completed tasks (tasks marked done via `taskctl done <id>`) from the task list in one operation.
@@ -302,6 +300,7 @@ Cleared 3 completed tasks. 4 tasks remaining.
 - Only tasks with `Done = true` are removed; pending tasks are unaffected.
 - If there are no completed tasks, the command reports `Cleared 0 completed tasks.`
 
+---
 
 ## Examples
 
