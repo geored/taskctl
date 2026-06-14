@@ -79,13 +79,15 @@ func run(args []string, w io.Writer) error {
 		}
 	}
 
-	// Validate --file path length and reject directory traversal. Fixes #76.
+	// Validate --file path length. Fixes #76.
 	if len(filePath) > maxFilePathLen {
 		return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
 	}
-	if strings.Contains(filePath, "..") {
-		return fmt.Errorf("--file path must not contain '..' (directory traversal rejected): %q", filePath)
-	}
+
+	// Fixes #83: path traversal and absolute-path validation is delegated
+	// entirely to NewManager, which uses filepath.Clean + IsAbs + HasPrefix
+	// checks as the single authoritative layer. We do not duplicate that logic
+	// here so there is no risk of the two checks diverging.
 
 	if len(remaining) == 0 {
 		printUsage()
@@ -163,9 +165,11 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	}
 
 	// Validate the --due flag value at the CLI boundary before calling the library.
+	// Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
+	// so that the substring is unambiguous for both users and tests.
 	if *due != "" {
 		if _, err := time.Parse("2006-01-02", *due); err != nil {
-			return fmt.Errorf("invalid --due value %q: expected format YYYY-MM-DD", *due)
+			return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
 		}
 	}
 
@@ -252,6 +256,10 @@ func runDone(mgr *task.Manager, args []string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("done: invalid task ID: %s", fs.Arg(0))
 	}
+	// Fixes #81: reject non-positive IDs at the CLI boundary.
+	if id <= 0 {
+		return fmt.Errorf("done: task ID must be a positive integer")
+	}
 	if err := mgr.Complete(id); err != nil {
 		return fmt.Errorf("done: %w", err)
 	}
@@ -274,6 +282,10 @@ func runDelete(mgr *task.Manager, args []string, w io.Writer) error {
 	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
 		return fmt.Errorf("delete: invalid task ID: %s", fs.Arg(0))
+	}
+	// Fixes #81: reject non-positive IDs at the CLI boundary.
+	if id <= 0 {
+		return fmt.Errorf("delete: task ID must be a positive integer")
 	}
 	if err := mgr.Delete(id); err != nil {
 		return fmt.Errorf("delete: %w", err)
