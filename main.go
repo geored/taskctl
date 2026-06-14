@@ -338,6 +338,13 @@ func runClear(mgr *task.Manager, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("clear: %w", err)
 	}
-	fmt.Fprintf(w, "Cleared %d completed tasks. %d tasks remaining.\n", cleared, remaining)
+	plural := func(n int) string {
+		if n == 1 {
+			return "task"
+		}
+		return "tasks"
+	}
+	fmt.Fprintf(w, "Cleared %d completed %s. %d %s remaining.\n",
+		cleared, plural(cleared), remaining, plural(remaining))
 	return nil
 }
