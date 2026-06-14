@@ -49,11 +49,6 @@ func newBuf() *bytes.Buffer {
 	return &bytes.Buffer{}
 }
 
-// intStr converts an int to its decimal string representation.
-func intStr(n int) string {
-	return strconv.Itoa(n)
-}
-
 // ---------------------------------------------------------------------------
 // run() tests
 // ---------------------------------------------------------------------------
@@ -257,7 +252,7 @@ func TestRunDone_Success(t *testing.T) {
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDone(mgr, []string{intStr(id)}, newBuf())
+	err := runDone(mgr, []string{strconv.Itoa(id)}, newBuf())
 	if err != nil {
 		t.Fatalf("runDone: unexpected error: %v", err)
 	}
@@ -303,7 +298,7 @@ func TestRunDelete_Success(t *testing.T) {
 	tasks, _ := mgr.List("", false)
 	id := tasks[0].ID
 
-	err := runDelete(mgr, []string{intStr(id)}, newBuf())
+	err := runDelete(mgr, []string{strconv.Itoa(id)}, newBuf())
 	if err != nil {
 		t.Fatalf("runDelete: unexpected error: %v", err)
 	}
@@ -356,7 +351,7 @@ func TestRunStats_WithTasks(t *testing.T) {
 	_ = runAdd(mgr, []string{"--priority", "low", "Task 2"}, newBuf())
 
 	tasks, _ := mgr.List("", false)
-	_ = runDone(mgr, []string{intStr(tasks[0].ID)}, newBuf())
+	_ = runDone(mgr, []string{strconv.Itoa(tasks[0].ID)}, newBuf())
 
 	err := runStats(mgr, newBuf())
 	if err != nil {
