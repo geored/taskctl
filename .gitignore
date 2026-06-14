@@ -1,3 +1,6 @@
+# Compiled binary
 taskctl
-tasks.json
 *.exe
+
+# Runtime data file — must never be committed (Fixes #78)
+tasks.json
