@@ -252,7 +252,7 @@ Display a summary of all tasks, including counts by status and priority, and the
 taskctl stats
 ```
 
-No flags are accepted — `stats` always reports on the full task list.
+No flags are accepted — `stats` always reports on the full task list. Note: there is no `count` command; use `stats` instead.
 
 **Example output:**
 
