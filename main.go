@@ -325,7 +325,7 @@ func runStats(mgr *task.Manager, w io.Writer) error {
 
 	pct := 0
 	if s.Total > 0 {
-		pct = s.Completed * 100 / s.Total
+		pct = (s.Completed*100 + s.Total/2) / s.Total
 	}
 
 	fmt.Fprintf(w, "Total tasks:     %d\n", s.Total)
