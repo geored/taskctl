@@ -60,6 +60,16 @@ func (t Task) IsOverdue(now time.Time) bool {
 	return nowDate.After(due)
 }
 
+// osFile is the subset of *os.File operations used by save().
+// It is defined as an interface so that tests can inject fakes.
+type osFile interface {
+	Chmod(mode os.FileMode) error
+	Write(b []byte) (int, error)
+	Sync() error
+	Close() error
+	Name() string
+}
+
 // Manager handles persistence and business logic for the task list.
 // A mutex is embedded to serialise access when multiple goroutines (or, via
 // OS-level file locks, multiple processes) share the same Manager instance.
@@ -68,6 +78,9 @@ func (t Task) IsOverdue(now time.Time) bool {
 type Manager struct {
 	filePath string
 	mu       sync.Mutex
+	// createTempFn is the factory used by save() to create temp files.
+	// When nil, os.CreateTemp is used. Tests may inject a replacement.
+	createTemp func(dir, pattern string) (osFile, error)
 }
 
 // NewManager creates a Manager that stores tasks in the given file.
@@ -227,7 +240,13 @@ func (m *Manager) save(tasks []Task) error {
 	}
 
 	dir := filepath.Dir(m.filePath)
-	tmp, err := os.CreateTemp(dir, "tasks-*.tmp")
+	createTemp := m.createTemp
+	if createTemp == nil {
+		createTemp = func(dir, pattern string) (osFile, error) {
+			return os.CreateTemp(dir, pattern)
+		}
+	}
+	tmp, err := createTemp(dir, "tasks-*.tmp")
 	if err != nil {
 		return fmt.Errorf("save: create temp: %w", err)
 	}
