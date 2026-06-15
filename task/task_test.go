@@ -941,3 +941,61 @@ func TestNewManagerSymlinkWithinCwdAccepted(t *testing.T) {
 		t.Error("expected non-nil *Manager, got nil")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ID guard tests — Complete and Delete with zero / negative IDs (Issue #135)
+// ---------------------------------------------------------------------------
+
+// TestComplete_ZeroID verifies that Complete returns a non-nil error mentioning
+// the invalid ID when called with id = 0. The guard fires before any disk I/O,
+// so no tasks need to be present in the store.
+func TestComplete_ZeroID(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Complete(0)
+	if err == nil {
+		t.Fatal("Complete(0): expected error for zero ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "0") {
+		t.Errorf("Complete(0): error should mention the invalid ID, got: %v", err)
+	}
+}
+
+// TestComplete_NegativeID verifies that Complete returns a non-nil error
+// mentioning the invalid ID when called with a negative id.
+func TestComplete_NegativeID(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Complete(-1)
+	if err == nil {
+		t.Fatal("Complete(-1): expected error for negative ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "-1") {
+		t.Errorf("Complete(-1): error should mention the invalid ID, got: %v", err)
+	}
+}
+
+// TestDelete_ZeroID verifies that Delete returns a non-nil error mentioning the
+// invalid ID when called with id = 0. The guard fires before any disk I/O, so
+// no tasks need to be present in the store.
+func TestDelete_ZeroID(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Delete(0)
+	if err == nil {
+		t.Fatal("Delete(0): expected error for zero ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "0") {
+		t.Errorf("Delete(0): error should mention the invalid ID, got: %v", err)
+	}
+}
+
+// TestDelete_NegativeID verifies that Delete returns a non-nil error mentioning
+// the invalid ID when called with a negative id.
+func TestDelete_NegativeID(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Delete(-5)
+	if err == nil {
+		t.Fatal("Delete(-5): expected error for negative ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "-5") {
+		t.Errorf("Delete(-5): error should mention the invalid ID, got: %v", err)
+	}
+}
