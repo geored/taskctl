@@ -8,6 +8,7 @@ package task
 // process runs as root (uid 0), because root bypasses filesystem permissions.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -159,5 +160,90 @@ func TestSave_CorruptedJSONReturnsPathInError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), taskFile) {
 		t.Errorf("load error should contain file path %q, got: %v", taskFile, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chmod and Sync failure tests — Fixes #133
+// ---------------------------------------------------------------------------
+
+// chmodFailFile wraps a real *os.File but returns a sentinel error from Chmod.
+// All other operations are delegated to the underlying file unchanged.
+type chmodFailFile struct {
+	*os.File
+}
+
+func (f *chmodFailFile) Chmod(_ os.FileMode) error {
+	return fmt.Errorf("injected chmod error")
+}
+
+// syncFailFile wraps a real *os.File but returns a sentinel error from Sync.
+type syncFailFile struct {
+	*os.File
+}
+
+func (f *syncFailFile) Sync() error {
+	return fmt.Errorf("injected sync error")
+}
+
+// TestSave_ChmodFailure verifies that save() surfaces an error prefixed with
+// "save: chmod" when Chmod on the temp file fails. Fixes #133.
+func TestSave_ChmodFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("filesystem permission semantics differ on Windows")
+	}
+	if isRoot() {
+		t.Skip("running as root: filesystem permission checks are bypassed")
+	}
+
+	dir := t.TempDir()
+	mgr := &Manager{filePath: filepath.Join(dir, "tasks.json")}
+
+	// Inject a factory that returns a file whose Chmod always fails.
+	mgr.createTemp = func(d, pattern string) (osFile, error) {
+		f, err := os.CreateTemp(d, pattern)
+		if err != nil {
+			return nil, err
+		}
+		return &chmodFailFile{f}, nil
+	}
+
+	err := mgr.save([]Task{{ID: 1, Title: "test", Priority: "low"}})
+	if err == nil {
+		t.Fatal("save: expected error for Chmod failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "save: chmod") {
+		t.Errorf("expected error to contain 'save: chmod', got: %v", err)
+	}
+}
+
+// TestSave_SyncFailure verifies that save() surfaces an error prefixed with
+// "save: sync" when Sync on the temp file fails. Fixes #133.
+func TestSave_SyncFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("filesystem permission semantics differ on Windows")
+	}
+	if isRoot() {
+		t.Skip("running as root: filesystem permission checks are bypassed")
+	}
+
+	dir := t.TempDir()
+	mgr := &Manager{filePath: filepath.Join(dir, "tasks.json")}
+
+	// Inject a factory that returns a file whose Sync always fails.
+	mgr.createTemp = func(d, pattern string) (osFile, error) {
+		f, err := os.CreateTemp(d, pattern)
+		if err != nil {
+			return nil, err
+		}
+		return &syncFailFile{f}, nil
+	}
+
+	err := mgr.save([]Task{{ID: 1, Title: "test", Priority: "low"}})
+	if err == nil {
+		t.Fatal("save: expected error for Sync failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "save: sync") {
+		t.Errorf("expected error to contain 'save: sync', got: %v", err)
 	}
 }
