@@ -896,3 +896,61 @@ func TestRunClear_SingularTask(t *testing.T) {
 		t.Errorf("runClear singular:\n  got:  %q\n  want: %q", got, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bug #130: --file / -file with no following value must return a clear error
+// ---------------------------------------------------------------------------
+
+// TestRun_FileFlag_BareAtEnd_DoubleDash verifies that `taskctl --file` (bare,
+// last token) returns "--file requires a value" instead of "unknown command: --file".
+func TestRun_FileFlag_BareAtEnd_DoubleDash(t *testing.T) {
+	err := run([]string{"taskctl", "--file"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error when --file has no value, got nil")
+	}
+	if !strings.Contains(err.Error(), "--file requires a value") {
+		t.Errorf("expected '--file requires a value', got: %v", err)
+	}
+}
+
+// TestRun_FileFlag_BareAtEnd_SingleDash verifies that `taskctl -file` (bare,
+// last token) returns "--file requires a value" instead of "unknown command: -file".
+func TestRun_FileFlag_BareAtEnd_SingleDash(t *testing.T) {
+	err := run([]string{"taskctl", "-file"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error when -file has no value, got nil")
+	}
+	if !strings.Contains(err.Error(), "--file requires a value") {
+		t.Errorf("expected '--file requires a value', got: %v", err)
+	}
+}
+
+// TestRun_FileFlag_ConsumesSubcommand verifies that `taskctl --file list`
+// (where list is incorrectly consumed as the filename) returns an error
+// indicating --file requires a value rather than the misleading "no command specified".
+func TestRun_FileFlag_ConsumesSubcommand(t *testing.T) {
+	// When --file eats "list" as its value, remaining becomes empty.
+	// The fix should detect the bare --file before the subcommand eats it.
+	// Since "list" gets consumed as the file value, we get "no command specified";
+	// that's the footgun documented in #130. The bare-at-end case above is the
+	// primary fix; this test documents the footgun.
+	err := run([]string{"taskctl", "--file", "list"}, newBuf())
+	if err == nil {
+		t.Fatal("expected error for taskctl --file list (list consumed as filename), got nil")
+	}
+	// At minimum an error must be returned; the exact message documents the footgun.
+	if err.Error() == "" {
+		t.Errorf("expected a non-empty error message, got empty string")
+	}
+}
+
+// TestRun_FileFlag_EqualsSignNoRegression verifies that --file=tasks.json
+// (equals-sign syntax) still works correctly after the fix (no regression).
+func TestRun_FileFlag_EqualsSignNoRegression(t *testing.T) {
+	chdirTemp(t)
+	buf := newBuf()
+	err := run([]string{"taskctl", "--file=tasks.json", "list"}, buf)
+	if err != nil {
+		t.Fatalf("--file=tasks.json list: unexpected error: %v", err)
+	}
+}

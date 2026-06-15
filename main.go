@@ -84,6 +84,16 @@ func run(args []string, w io.Writer) error {
 		}
 	}
 
+	// Guard: if any bare --file / -file token survived the pre-scan loop it
+	// means the flag appeared without a following value (e.g. `taskctl --file`).
+	// Return a clear error instead of the confusing "unknown command: --file".
+	// Fixes #130.
+	for _, tok := range remaining {
+		if tok == "--file" || tok == "-file" {
+			return fmt.Errorf("--file requires a value")
+		}
+	}
+
 	// Validate --file path length. Fixes #76.
 	if len(filePath) > maxFilePathLen {
 		return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
