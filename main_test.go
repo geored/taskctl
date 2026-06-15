@@ -954,3 +954,30 @@ func TestRun_FileFlag_EqualsSignNoRegression(t *testing.T) {
 		t.Fatalf("--file=tasks.json list: unexpected error: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestRunStats_CompletionRateRounding verifies that completion rate is
+// rounded rather than truncated (Issue #134).
+// ---------------------------------------------------------------------------
+
+func TestRunStats_CompletionRateRounding(t *testing.T) {
+	// 2 of 3 completed: truncated integer gives 66%, rounded gives 67%
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"Task A"}, newBuf())
+	_ = runAdd(mgr, []string{"Task B"}, newBuf())
+	_ = runAdd(mgr, []string{"Task C"}, newBuf())
+
+	tasks, _ := mgr.List("", false)
+	_ = runDone(mgr, []string{strconv.Itoa(tasks[0].ID)}, newBuf())
+	_ = runDone(mgr, []string{strconv.Itoa(tasks[1].ID)}, newBuf())
+
+	buf := newBuf()
+	if err := runStats(mgr, buf); err != nil {
+		t.Fatalf("runStats: unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Completion rate: 67%") {
+		t.Errorf("expected 'Completion rate: 67%%' (rounded), got: %q", out)
+	}
+}
