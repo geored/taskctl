@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -980,4 +982,65 @@ func TestRunStats_CompletionRateRounding(t *testing.T) {
 	if !strings.Contains(out, "Completion rate: 67%") {
 		t.Errorf("expected 'Completion rate: 67%%' (rounded), got: %q", out)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMain_ExitCode — subprocess integration test for main() exit behaviour
+// Fixes #132: validates that os.Exit(1) is called on error and os.Exit(0)
+// on success, which was previously 0% covered.
+// ---------------------------------------------------------------------------
+
+// TestMain_ExitCode builds the real binary and runs it as a child process to
+// verify the exit-code wiring inside main():
+//   - an unknown command produces exit code 1
+//   - a valid no-error invocation produces exit code 0
+//
+// This is the standard Go pattern for testing os.Exit() without terminating
+// the test process itself.
+func TestMain_ExitCode(t *testing.T) {
+	// Skip if the Go toolchain is not available in this environment.
+	goExe, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not found in PATH, skipping subprocess test")
+	}
+
+	// Build the binary into a temp dir so the test is hermetic and cleans up.
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "taskctl_test_binary")
+
+	// Build the binary from the current source tree.
+	buildCmd := exec.Command(goExe, "build", "-o", binaryPath, ".")
+	buildCmd.Dir = "." // build from workspace root (wherever the test runs)
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\noutput:\n%s", err, out)
+	}
+
+	t.Run("ErrorPath_ExitCode1", func(t *testing.T) {
+		// "frobnicate" is an unknown command — must exit 1.
+		cmd := exec.Command(binaryPath, "frobnicate")
+		// We deliberately DO NOT call t.Fatal on cmd.Run() error here;
+		// ExitError is the expected outcome.
+		err := cmd.Run()
+		if err == nil {
+			t.Fatal("expected non-zero exit for unknown command, got exit 0")
+		}
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+		}
+		if got := exitErr.ExitCode(); got != 1 {
+			t.Errorf("exit code: got %d, want 1", got)
+		}
+	})
+
+	t.Run("SuccessPath_ExitCode0", func(t *testing.T) {
+		// "--version" is a valid no-error invocation — must exit 0.
+		cmd := exec.Command(binaryPath, "--version")
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("expected exit 0 for --version, got: %v", err)
+		}
+		if got := cmd.ProcessState.ExitCode(); got != 0 {
+			t.Errorf("exit code: got %d, want 0", got)
+		}
+	})
 }
