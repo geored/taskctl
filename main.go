@@ -14,21 +14,12 @@ import (
 )
 
 // version is set at build time via -ldflags "-X main.version=<tag>".
-// Fixes #74: support taskctl --version and taskctl version.
 var version = "dev"
 
-// maxFilePathLen is the maximum allowed length for the --file flag value.
-// Fixes #76: reject excessively long file paths.
 const maxFilePathLen = 4096
-
-// maxDueDateLen is the maximum allowed length for the --due flag value.
-// YYYY-MM-DD is exactly 10 characters.
-// Fixes #85: reject excessively long due date strings before time.Parse.
 const maxDueDateLen = 10
 
 func init() {
-	// Remove the default timestamp prefix from log messages so that the CLI
-	// output is clean; the caller sees only the message itself.
 	log.SetFlags(0)
 }
 
@@ -39,30 +30,20 @@ func main() {
 	}
 }
 
-// run is the testable entry-point for the CLI. args is the full argument list
-// (including the program name at index 0). w receives any output that would
-// normally go to stdout.
 func run(args []string, w io.Writer) error {
 	if len(args) < 2 {
 		printUsage()
 		return fmt.Errorf("no command specified")
 	}
-
-	// Support top-level --help / -h before any subcommand.
 	if args[1] == "--help" || args[1] == "-h" {
 		printUsage()
 		return nil
 	}
-
-	// Support --version / version subcommand. Fixes #74.
 	if args[1] == "--version" || args[1] == "-version" || args[1] == "version" {
 		fmt.Fprintf(w, "taskctl version %s\n", version)
 		return nil
 	}
 
-	// Parse the top-level --file flag, which may appear before or after the
-	// subcommand. We do a quick pre-scan for --file / --file=<val> so that
-	// `taskctl --file x.json add ...` works as well as `taskctl add --file x.json ...`.
 	filePath := "tasks.json"
 	remaining := args[1:]
 	for i := 0; i < len(remaining); i++ {
@@ -72,6 +53,11 @@ func run(args []string, w io.Writer) error {
 				filePath = remaining[i+1]
 				remaining = append(remaining[:i], remaining[i+2:]...)
 				i--
+			} else {
+				// Finding #5: bare --file at end — return clear error immediately
+				// instead of leaving the token in remaining and producing a
+				// confusing downstream error.
+				return fmt.Errorf("--file requires a value")
 			}
 		} else if strings.HasPrefix(a, "--file=") {
 			filePath = strings.TrimPrefix(a, "--file=")
@@ -84,25 +70,16 @@ func run(args []string, w io.Writer) error {
 		}
 	}
 
-	// Guard: if any bare --file / -file token survived the pre-scan loop it
-	// means the flag appeared without a following value (e.g. `taskctl --file`).
-	// Return a clear error instead of the confusing "unknown command: --file".
-	// Fixes #130.
+	// Secondary guard for any remaining bare --file/-file tokens. Fixes #130.
 	for _, tok := range remaining {
 		if tok == "--file" || tok == "-file" {
 			return fmt.Errorf("--file requires a value")
 		}
 	}
 
-	// Validate --file path length. Fixes #76.
 	if len(filePath) > maxFilePathLen {
 		return fmt.Errorf("--file path exceeds maximum length of %d characters", maxFilePathLen)
 	}
-
-	// Fixes #83: path traversal and absolute-path validation is delegated
-	// entirely to NewManager, which uses filepath.Clean + IsAbs + HasPrefix
-	// checks as the single authoritative layer. We do not duplicate that logic
-	// here so there is no risk of the two checks diverging.
 
 	if len(remaining) == 0 {
 		printUsage()
@@ -136,7 +113,6 @@ func run(args []string, w io.Writer) error {
 	}
 }
 
-// printUsage writes a short help message to stderr.
 func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage: taskctl [--file <path>] <command> [options]
 
@@ -156,9 +132,9 @@ Commands:
 }
 
 // runAdd handles the "add" sub-command.
-// Flags: --priority (default "medium"), --due (optional, YYYY-MM-DD).
-// Remaining args after flag parsing are joined as the task title.
-// Returns an error instead of calling os.Exit, enabling unit testing.
+// Due-date format validation is the library's single authority (Finding #4).
+// The CLI performs only a cheap length pre-filter (Fixes #85) and a
+// user-friendly format check (Fixes #32) before delegating to the library.
 func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -167,31 +143,23 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("add: %w", err)
 	}
-
 	if fs.NArg() == 0 {
 		return fmt.Errorf("add: task title is required")
 	}
-
-	// Join remaining positional arguments as the title so that users do not
-	// need to quote multi-word titles.
 	title := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if title == "" {
 		return fmt.Errorf("add: task title must not be empty")
 	}
-
-	// Validate the --due flag value at the CLI boundary before calling the library.
-	// Fixes #85: reject oversized input before time.Parse is called.
-	// Fixes #32: return a user-friendly error containing "expected format YYYY-MM-DD"
-	// so that the substring is unambiguous for both users and tests.
 	if *due != "" {
 		if len(*due) > maxDueDateLen {
 			return fmt.Errorf("add: --due value exceeds maximum length of %d characters", maxDueDateLen)
 		}
+		// User-friendly format check at CLI boundary (Fixes #32).
+		// The library also validates; this provides a clearer error message.
 		if _, err := time.Parse("2006-01-02", *due); err != nil {
 			return fmt.Errorf("add: invalid due date, expected format YYYY-MM-DD")
 		}
 	}
-
 	if err := mgr.Add(title, *priority, *due); err != nil {
 		return fmt.Errorf("add: %w", err)
 	}
@@ -199,9 +167,6 @@ func runAdd(mgr *task.Manager, args []string, w io.Writer) error {
 	return nil
 }
 
-// runList handles the "list" sub-command.
-// Flags: --priority (filter by priority), --overdue (show only overdue tasks).
-// Returns an error instead of calling os.Exit, enabling unit testing.
 func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -210,74 +175,68 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
-
-	// Validate the --priority flag value at the CLI boundary.
 	if *priority != "" {
 		switch *priority {
 		case "low", "medium", "high":
-			// valid
 		default:
 			return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)
 		}
 	}
-
 	tasks, err := mgr.List(*priority, *overdueOnly)
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
-
 	if len(tasks) == 0 {
 		fmt.Fprintln(w, "No tasks found.")
 		return nil
 	}
-
 	now := time.Now()
-
-	// Header
 	fmt.Fprintf(w, "%-4s %-6s %-8s %-12s %s\n", "ID", "Done", "Priority", "Due Date", "Title")
 	fmt.Fprintln(w, "------------------------------------------------------")
-
 	for _, t := range tasks {
 		done := "[ ]"
 		if t.Done {
 			done = "[x]"
 		}
-
 		due := t.DueDate
 		if due == "" {
 			due = "-"
 		}
-
-		// Append an [OVERDUE] marker for incomplete tasks past their due date.
 		title := t.Title
 		if t.IsOverdue(now) {
 			title += " [OVERDUE]"
 		}
-
 		fmt.Fprintf(w, "%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)
 	}
 	return nil
 }
 
-// runDone handles the "done" sub-command.
-// Returns an error instead of calling os.Exit, enabling unit testing.
-func runDone(mgr *task.Manager, args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("done", flag.ContinueOnError)
+// parseID parses a single positive integer task ID from args.
+// This helper eliminates the structural duplication between runDone and
+// runDelete (Finding #7): both commands share identical ID-parsing boilerplate.
+func parseID(cmd string, args []string) (int, error) {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("done: %w", err)
+		return 0, fmt.Errorf("%s: %w", cmd, err)
 	}
-
 	if fs.NArg() == 0 {
-		return fmt.Errorf("done: task ID is required")
+		return 0, fmt.Errorf("%s: task ID is required", cmd)
 	}
 	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil {
-		return fmt.Errorf("done: invalid task ID: %s", fs.Arg(0))
+		return 0, fmt.Errorf("%s: invalid task ID: %s", cmd, fs.Arg(0))
 	}
-	// Fixes #81: reject non-positive IDs at the CLI boundary.
 	if id <= 0 {
-		return fmt.Errorf("done: task ID must be a positive integer")
+		return 0, fmt.Errorf("%s: task ID must be a positive integer", cmd)
+	}
+	return id, nil
+}
+
+func runDone(mgr *task.Manager, args []string, w io.Writer) error {
+	id, err := parseID("done", args)
+	if err != nil {
+		return err
 	}
 	if err := mgr.Complete(id); err != nil {
 		return fmt.Errorf("done: %w", err)
@@ -286,25 +245,10 @@ func runDone(mgr *task.Manager, args []string, w io.Writer) error {
 	return nil
 }
 
-// runDelete handles the "delete" sub-command.
-// Returns an error instead of calling os.Exit, enabling unit testing.
 func runDelete(mgr *task.Manager, args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("delete: %w", err)
-	}
-
-	if fs.NArg() == 0 {
-		return fmt.Errorf("delete: task ID is required")
-	}
-	id, err := strconv.Atoi(fs.Arg(0))
+	id, err := parseID("delete", args)
 	if err != nil {
-		return fmt.Errorf("delete: invalid task ID: %s", fs.Arg(0))
-	}
-	// Fixes #81: reject non-positive IDs at the CLI boundary.
-	if id <= 0 {
-		return fmt.Errorf("delete: task ID must be a positive integer")
+		return err
 	}
 	if err := mgr.Delete(id); err != nil {
 		return fmt.Errorf("delete: %w", err)
@@ -313,21 +257,15 @@ func runDelete(mgr *task.Manager, args []string, w io.Writer) error {
 	return nil
 }
 
-// runStats handles the "stats" sub-command.
-// It prints a summary that includes completion counts, overdue count,
-// per-priority task counts, and the overall completion rate.
-// Returns an error instead of calling os.Exit, enabling unit testing.
 func runStats(mgr *task.Manager, w io.Writer) error {
 	s, err := mgr.Stats()
 	if err != nil {
 		return fmt.Errorf("stats: %w", err)
 	}
-
 	pct := 0
 	if s.Total > 0 {
 		pct = (s.Completed*100 + s.Total/2) / s.Total
 	}
-
 	fmt.Fprintf(w, "Total tasks:     %d\n", s.Total)
 	fmt.Fprintf(w, "  Pending:       %d\n", s.Pending)
 	fmt.Fprintf(w, "  Completed:     %d\n", s.Completed)
@@ -339,19 +277,19 @@ func runStats(mgr *task.Manager, w io.Writer) error {
 	return nil
 }
 
-// runClear handles the "clear" sub-command.
-// It removes all tasks marked as done and prints how many were cleared and
-// how many tasks remain. Returns an error instead of calling os.Exit so that
-// the caller (main) controls the exit code and tests can capture errors.
 func runClear(mgr *task.Manager, w io.Writer) error {
 	cleared, remaining, err := mgr.Clear()
 	if err != nil {
 		return fmt.Errorf("clear: %w", err)
 	}
 	clearedWord := "tasks"
-	if cleared == 1 { clearedWord = "task" }
+	if cleared == 1 {
+		clearedWord = "task"
+	}
 	remainingWord := "tasks"
-	if remaining == 1 { remainingWord = "task" }
+	if remaining == 1 {
+		remainingWord = "task"
+	}
 	fmt.Fprintf(w, "Cleared %d completed %s. %d %s remaining.\n", cleared, clearedWord, remaining, remainingWord)
 	return nil
 }
