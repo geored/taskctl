@@ -101,9 +101,12 @@ func NewManager(filePath string) (*Manager, error) {
 		return nil, fmt.Errorf("NewManager: path %q must be a relative path", filePath)
 	}
 
-	// Reject obvious traversal attempts: if the cleaned path starts with ".."
-	// it points outside the current working directory.
-	if strings.HasPrefix(clean, "..") {
+	// Reject obvious traversal attempts: if the first path component is the
+	// literal ".." it points outside the current working directory. We check
+	// only the first component (not a raw byte-prefix) so that valid filenames
+	// like "..foo" or "..tasks.json" — which begin with ".." as characters but
+	// are not the parent-directory component — are accepted (Fixes #144).
+	if parts := strings.SplitN(clean, string(filepath.Separator), 2); parts[0] == ".." {
 		return nil, fmt.Errorf("NewManager: path %q attempts directory traversal", filePath)
 	}
 

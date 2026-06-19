@@ -69,8 +69,10 @@ func TestNewManagerAbsolutePathRejected(t *testing.T) {
 	}
 }
 
-// TestNewManagerTraversalRejected verifies that paths beginning with ".." are
-// rejected by NewManager.
+// TestNewManagerTraversalRejected verifies that paths beginning with the ".."
+// component are rejected by NewManager. Only the literal ".." component means
+// "parent directory"; filenames that merely start with the characters ".." (like
+// "..foo") must be accepted (regression guard for Issue #144).
 func TestNewManagerTraversalRejected(t *testing.T) {
 	paths := []string{
 		"../../etc/shadow",
@@ -82,6 +84,30 @@ func TestNewManagerTraversalRejected(t *testing.T) {
 		if err == nil {
 			t.Errorf("NewManager(%q): expected error for traversal path, got nil", p)
 		}
+	}
+}
+
+// TestNewManagerDotDotPrefixAccepted verifies that filenames whose bytes begin
+// with ".." but are NOT the ".." component (e.g. "..foo", "..tasks.json") are
+// accepted by NewManager. These are valid single-component filenames and must
+// not be rejected as directory traversal (Fixes #144).
+func TestNewManagerDotDotPrefixAccepted(t *testing.T) {
+	validPaths := []string{
+		"..foo",
+		"..tasks.json",
+		"..hidden",
+	}
+	for _, p := range validPaths {
+		t.Run(p, func(t *testing.T) {
+			chdirTemp(t)
+			mgr, err := NewManager(p)
+			if err != nil {
+				t.Errorf("NewManager(%q): unexpected error for valid filename with '..' prefix: %v", p, err)
+			}
+			if mgr == nil {
+				t.Errorf("NewManager(%q): expected non-nil *Manager, got nil", p)
+			}
+		})
 	}
 }
 
