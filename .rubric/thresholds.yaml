@@ -1,0 +1,10 @@
+entropy: {}
+gravity:
+  baseline:
+    p50_seconds: 0.0
+  benchmark_command: /tmp/bench_app --help
+  type: cli
+kinematics:
+  max_pr_age_hours: 48
+trust:
+  baseline_coverage: 94.9
