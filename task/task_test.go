@@ -1048,3 +1048,55 @@ func TestIsOverdue_MalformedDate(t *testing.T) {
 		t.Error("IsOverdue: expected false for malformed DueDate, got true")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// evalSymlinksPartial depth-limit guard (Issue #149)
+// ---------------------------------------------------------------------------
+
+// TestNewManagerDeepPathDepthLimitExceeded verifies that NewManager returns a
+// descriptive error when given a relative path with more than maxPathDepth
+// (256) non-existent directory components. This guards against a potential DoS
+// where a crafted path causes the evalSymlinksPartial loop to iterate hundreds
+// of times (Fixes #149).
+func TestNewManagerDeepPathDepthLimitExceeded(t *testing.T) {
+	chdirTemp(t)
+
+	// Build a path with 300 non-existent components (exceeds maxPathDepth=256).
+	components := make([]string, 300)
+	for i := range components {
+		components[i] = "d"
+	}
+	components = append(components, "tasks.json")
+	deepPath := filepath.Join(components...)
+
+	_, err := NewManager(deepPath)
+	if err == nil {
+		t.Fatal("NewManager with 300-component deep path: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "depth limit") && !strings.Contains(err.Error(), "cannot resolve") {
+		t.Errorf("expected error to mention depth limit or cannot resolve, got: %v", err)
+	}
+}
+
+// TestNewManagerModerateDepthPathAccepted verifies that a path with fewer than
+// maxPathDepth non-existent components is accepted by NewManager (no false
+// positive from the depth guard).
+func TestNewManagerModerateDepthPathAccepted(t *testing.T) {
+	chdirTemp(t)
+
+	// 10 components is well within the 256 limit.
+	components := make([]string, 10)
+	for i := range components {
+		components[i] = "sub"
+	}
+	components = append(components, "tasks.json")
+	moderatePath := filepath.Join(components...)
+
+	mgr, err := NewManager(moderatePath)
+	if err != nil {
+		t.Errorf("NewManager with 10-component path: unexpected error: %v", err)
+	}
+	if mgr == nil {
+		t.Error("expected non-nil *Manager, got nil")
+	}
+}
