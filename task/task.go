@@ -142,14 +142,28 @@ func NewManager(filePath string) (*Manager, error) {
 	return &Manager{filePath: clean}, nil
 }
 
+// maxPathDepth is the maximum number of non-existent path components that
+// evalSymlinksPartial will strip before giving up. This bounds worst-case
+// loop iterations to prevent a denial-of-service when a crafted path with
+// hundreds of components is passed to NewManager (Fixes #149).
+const maxPathDepth = 256
+
 // evalSymlinksPartial resolves symlinks on the longest existing prefix of
 // absPath and returns the fully resolved path (existing prefix resolved +
 // non-existing suffix re-appended). absPath must be an absolute path.
+//
+// The loop is bounded by maxPathDepth iterations to prevent excessive CPU
+// usage on deeply nested non-existent paths (Fixes #149).
 func evalSymlinksPartial(absPath string) (string, error) {
 	dir := absPath
 	suffix := ""
+	remaining := maxPathDepth
 
 	for {
+		if remaining <= 0 {
+			return "", fmt.Errorf("evalSymlinksPartial: path depth limit (%d) exceeded for %q", maxPathDepth, absPath)
+		}
+
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Reached the filesystem root without finding an existing component.
@@ -173,6 +187,7 @@ func evalSymlinksPartial(absPath string) (string, error) {
 			suffix = filepath.Join(base, suffix)
 		}
 		dir = parent
+		remaining--
 	}
 }
 
