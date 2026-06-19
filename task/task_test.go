@@ -1025,3 +1025,26 @@ func TestDelete_NegativeID(t *testing.T) {
 		t.Errorf("Delete(-5): error should mention the invalid ID, got: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// IsOverdue malformed-date branch (Issue #150)
+// ---------------------------------------------------------------------------
+
+// TestIsOverdue_MalformedDate verifies that IsOverdue returns false (and does
+// not panic) when a Task has a DueDate value that cannot be parsed as
+// "2006-01-02". This branch is unreachable through the public Manager API
+// because Add and load both validate the format, but it is reachable via
+// direct struct construction (e.g. hand-crafted JSON bypassing the Manager).
+// Fixes #150.
+func TestIsOverdue_MalformedDate(t *testing.T) {
+	task := Task{
+		ID:      99,
+		Title:   "Bad date task",
+		Done:    false,
+		DueDate: "not-a-date",
+	}
+	now := time.Now()
+	if task.IsOverdue(now) {
+		t.Error("IsOverdue: expected false for malformed DueDate, got true")
+	}
+}
