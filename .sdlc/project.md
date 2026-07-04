@@ -72,7 +72,6 @@ taskctl (CLI binary)
 ├── README.md                    User-facing documentation
 ├── tasks.json                   Default runtime storage (gitignored at runtime)
 ├── taskctl                      Pre-built binary (committed for convenience)
-├── coverage*.out / *.html       Historical coverage snapshots
 └── reviews/
     └── critic_report.md         Critic agent output — DO NOT MODIFY
 ```
@@ -178,10 +177,8 @@ go test ./...
 # Run with race detector (required before any merge)
 go test ./... -race
 
-# Coverage report
-go test ./... -coverprofile=coverage.out
-go tool cover -func=coverage.out
-go tool cover -html=coverage.out -o coverage.html
+# Coverage report (runs with -race, generates HTML, prints numeric total)
+make coverage
 
 # Vet (must produce zero output)
 go vet ./...

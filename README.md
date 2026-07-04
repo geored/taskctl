@@ -395,9 +395,8 @@ go test -v ./task/...
 # Run tests with race-condition detection
 go test -race ./...
 
-# Generate a coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
+# Generate a coverage report (runs tests with -race, produces HTML, prints total %)
+make coverage
 ```
 
 The test suite covers:

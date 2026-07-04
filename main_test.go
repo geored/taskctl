@@ -114,7 +114,6 @@ func TestRun_FooDotDotBarAccepted(t *testing.T) {
 	}
 }
 
-
 func TestRun_HelpFlag(t *testing.T) {
 	err := run([]string{"taskctl", "--help"}, newBuf())
 	if err != nil {
