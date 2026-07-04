@@ -753,6 +753,26 @@ func TestRun_VersionFlagSingleDash(t *testing.T) {
 	}
 }
 
+// TestRun_VersionShortFlag verifies that `taskctl -v` prints version info
+// including build metadata and returns nil, matching the other version aliases.
+func TestRun_VersionShortFlag(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "-v"}, buf)
+	if err != nil {
+		t.Fatalf("run -v: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "taskctl version") {
+		t.Errorf("run -v: expected output to contain 'taskctl version', got: %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("run -v: expected output to contain 'commit:', got: %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("run -v: expected output to contain 'built:', got: %q", out)
+	}
+}
+
 // TestRun_VersionSubcommand verifies that `taskctl version` prints version
 // info including build metadata and returns nil. Fixes #55 / #74.
 func TestRun_VersionSubcommand(t *testing.T) {
