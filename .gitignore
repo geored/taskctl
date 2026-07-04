@@ -6,6 +6,5 @@ taskctl
 tasks.json
 
 # Coverage artefacts — regenerated on demand (see Makefile)
-coverage*.out
-coverage*.html
-cov_*.out
+cov*.out
+cov*.html
