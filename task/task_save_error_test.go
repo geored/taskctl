@@ -16,6 +16,8 @@ import (
 	"testing"
 )
 
+const osWindows = "windows"
+
 // isRoot reports whether the current process is running as root.
 // Chmod/permission-based failure tests must be skipped when running as root
 // because root ignores filesystem permission bits.
@@ -27,7 +29,7 @@ func isRoot() bool {
 // os.CreateTemp cannot create a file (e.g. the directory does not exist or
 // is read-only). Fixes #45.
 func TestSave_CreateTempFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		t.Skip("read-only directory semantics differ on Windows")
 	}
 	if isRoot() {
@@ -71,7 +73,7 @@ func TestSave_CreateTempFailure(t *testing.T) {
 // This test covers the rename failure path (equivalent to write success but
 // rename failure). Fixes #45.
 func TestSave_RenameFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		t.Skip("read-only directory semantics differ on Windows")
 	}
 	if isRoot() {
@@ -189,7 +191,7 @@ func (f *syncFailFile) Sync() error {
 // TestSave_ChmodFailure verifies that save() surfaces an error prefixed with
 // "save: chmod" when Chmod on the temp file fails. Fixes #133.
 func TestSave_ChmodFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		t.Skip("filesystem permission semantics differ on Windows")
 	}
 	if isRoot() {
@@ -220,7 +222,7 @@ func TestSave_ChmodFailure(t *testing.T) {
 // TestSave_SyncFailure verifies that save() surfaces an error prefixed with
 // "save: sync" when Sync on the temp file fails. Fixes #133.
 func TestSave_SyncFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		t.Skip("filesystem permission semantics differ on Windows")
 	}
 	if isRoot() {
