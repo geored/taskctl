@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -55,12 +54,11 @@ func run(args []string, w io.Writer) error {
 		return nil
 	}
 	if args[1] == "--version" || args[1] == "-version" || args[1] == "-v" || args[1] == "version" {
-		bw := bufio.NewWriter(w)
-		fmt.Fprintf(bw, "taskctl version %s\n", version)
-		fmt.Fprintf(bw, "commit: %s\n", commit)
-		fmt.Fprintf(bw, "built: %s\n", date)
-		fmt.Fprintf(bw, "go: %s\n", runtime.Version())
-		return bw.Flush()
+		fmt.Fprintf(w, "taskctl version %s\n", version)
+		fmt.Fprintf(w, "commit: %s\n", commit)
+		fmt.Fprintf(w, "built: %s\n", date)
+		fmt.Fprintf(w, "go: %s\n", runtime.Version())
+		return nil
 	}
 
 	filePath := "tasks.json"
