@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +15,21 @@ import (
 	"github.com/geored/taskctl/task"
 )
 
-// version is set at build time via -ldflags "-X main.version=<tag>".
-var version = "dev"
+// version, commit, and date are set at build time via -ldflags.
+//
+// Release builds MUST inject a semantic version (e.g. v1.2.3) into
+// main.version so that the output satisfies "taskctl version v<MAJOR>.<MINOR>.<PATCH>".
+//
+// Example:
+//
+//	go build -ldflags "-X main.version=v1.2.3 -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
+//
+// The default "dev" is used for local/development builds where no tag is available.
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
 
 const maxFilePathLen = 4096
 const maxDueDateLen = 10
@@ -39,16 +54,21 @@ func run(args []string, w io.Writer) error {
 		printUsage()
 		return nil
 	}
-	if args[1] == "--version" || args[1] == "-version" || args[1] == "version" {
-		fmt.Fprintf(w, "taskctl version %s\n", version)
-		return nil
+	if args[1] == "--version" || args[1] == "-version" || args[1] == "-v" || args[1] == "version" {
+		bw := bufio.NewWriter(w)
+		fmt.Fprintf(bw, "taskctl version %s\n", version)
+		fmt.Fprintf(bw, "commit: %s\n", commit)
+		fmt.Fprintf(bw, "built: %s\n", date)
+		fmt.Fprintf(bw, "go: %s\n", runtime.Version())
+		return bw.Flush()
 	}
 
 	filePath := "tasks.json"
 	remaining := args[1:]
 	for i := 0; i < len(remaining); i++ {
 		a := remaining[i]
-		if a == "--file" || a == "-file" {
+		switch {
+		case a == "--file" || a == "-file":
 			if i+1 < len(remaining) {
 				filePath = remaining[i+1]
 				remaining = append(remaining[:i], remaining[i+2:]...)
@@ -59,14 +79,16 @@ func run(args []string, w io.Writer) error {
 				// confusing downstream error.
 				return fmt.Errorf("--file requires a value")
 			}
-		} else if strings.HasPrefix(a, "--file=") {
+		case strings.HasPrefix(a, "--file="):
 			filePath = strings.TrimPrefix(a, "--file=")
 			remaining = append(remaining[:i], remaining[i+1:]...)
 			i--
-		} else if strings.HasPrefix(a, "-file=") {
+		case strings.HasPrefix(a, "-file="):
 			filePath = strings.TrimPrefix(a, "-file=")
 			remaining = append(remaining[:i], remaining[i+1:]...)
 			i--
+		default:
+			// Not a file flag; leave the argument in remaining for command parsing.
 		}
 	}
 
@@ -118,7 +140,7 @@ func printUsage() {
 
 Global flags:
   --file <path>   Path to the tasks JSON file (default: tasks.json)
-  --version       Print the version string and exit
+  --version, -v   Print the version string and exit
   --help, -h      Show this help message
 
 Commands:
@@ -177,7 +199,7 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	}
 	if *priority != "" {
 		switch *priority {
-		case "low", "medium", "high":
+		case task.PriorityLow, task.PriorityMedium, task.PriorityHigh:
 		default:
 			return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)
 		}
