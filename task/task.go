@@ -16,6 +16,13 @@ import (
 // dateLayout is the canonical date format accepted and displayed by taskctl.
 const dateLayout = "2006-01-02"
 
+// Priority constants define the accepted task priority levels.
+const (
+	PriorityHigh   = "high"
+	PriorityMedium = "medium"
+	PriorityLow    = "low"
+)
+
 // maxTitleLength is the maximum number of Unicode characters (runes) allowed
 // in a task title. Titles longer than this are rejected at the Add boundary
 // to prevent unbounded storage growth and UI display issues.
@@ -225,7 +232,7 @@ func (m *Manager) load() ([]Task, error) {
 		}
 		// 3. Priority must be one of the accepted values.
 		switch t.Priority {
-		case "high", "medium", "low":
+		case PriorityHigh, PriorityMedium, PriorityLow:
 			// valid
 		default:
 			return nil, fmt.Errorf("load: record %d (id %d) has unknown priority %q: must be high, medium, or low", i, t.ID, t.Priority)
@@ -272,7 +279,7 @@ func (m *Manager) save(tasks []Task) error {
 	// Clean up the temp file on any error path; if Rename succeeded the file
 	// no longer exists under tmpName and Remove is a harmless no-op.
 	defer func() {
-		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		_ = os.Remove(tmpName) // best-effort cleanup
 	}()
 
 	if err := tmp.Chmod(0600); err != nil {
@@ -317,7 +324,7 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 
 	// Validate priority at the public API boundary.
 	switch priority {
-	case "high", "medium", "low":
+	case PriorityHigh, PriorityMedium, PriorityLow:
 		// valid
 	default:
 		return fmt.Errorf("invalid priority %q: must be high, medium, or low", priority)
@@ -365,7 +372,7 @@ func (m *Manager) Add(title, priority, dueDate string) error {
 // An empty string is also valid (meaning "no filter").
 func isValidPriority(p string) bool {
 	switch p {
-	case "", "low", "medium", "high":
+	case "", PriorityLow, PriorityMedium, PriorityHigh:
 		return true
 	default:
 		return false
@@ -548,11 +555,11 @@ func (m *Manager) Stats() (Stats, error) {
 
 		// Priority breakdown — tallied regardless of done state.
 		switch t.Priority {
-		case "high":
+		case PriorityHigh:
 			s.HighPriority++
-		case "medium":
+		case PriorityMedium:
 			s.MediumPriority++
-		case "low":
+		case PriorityLow:
 			s.LowPriority++
 		}
 	}

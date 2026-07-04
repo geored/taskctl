@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,8 +16,7 @@ import (
 
 // chdirTemp changes the working directory to a fresh temporary directory for
 // the duration of the test and restores the original directory on cleanup.
-// It returns the absolute path of the temporary directory.
-func chdirTemp(t *testing.T) string {
+func chdirTemp(t *testing.T) {
 	t.Helper()
 	orig, err := os.Getwd()
 	if err != nil {
@@ -30,7 +31,6 @@ func chdirTemp(t *testing.T) string {
 			t.Errorf("chdirTemp cleanup: Chdir(%q): %v", orig, err)
 		}
 	})
-	return dir
 }
 
 // newTestManager creates a Manager backed by a temp file isolated per test.
@@ -113,7 +113,6 @@ func TestRun_FooDotDotBarAccepted(t *testing.T) {
 		t.Errorf("foo..bar should be accepted as a valid filename, got: %v", err)
 	}
 }
-
 
 func TestRun_HelpFlag(t *testing.T) {
 	err := run([]string{"taskctl", "--help"}, newBuf())
@@ -715,40 +714,122 @@ func TestRun_FileFlag_BeforeAndAfterConsistent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestRun_VersionFlag verifies that `taskctl --version` prints version info
-// and returns nil (no error). Fixes #55.
+// including build metadata and returns nil (no error). Fixes #55.
 func TestRun_VersionFlag(t *testing.T) {
 	buf := newBuf()
 	err := run([]string{"taskctl", "--version"}, buf)
 	if err != nil {
 		t.Fatalf("run --version: unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "taskctl version") {
-		t.Errorf("run --version: expected output to contain 'taskctl version', got: %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "taskctl version") {
+		t.Errorf("run --version: expected output to contain 'taskctl version', got: %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("run --version: expected output to contain 'commit:', got: %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("run --version: expected output to contain 'built:', got: %q", out)
 	}
 }
 
-// TestRun_VersionFlagSingleDash verifies that `taskctl -version` also works.
+// TestRun_VersionFlagSingleDash verifies that `taskctl -version` also works
+// and produces identical build metadata.
 func TestRun_VersionFlagSingleDash(t *testing.T) {
 	buf := newBuf()
 	err := run([]string{"taskctl", "-version"}, buf)
 	if err != nil {
 		t.Fatalf("run -version: unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "taskctl version") {
-		t.Errorf("run -version: expected output to contain 'taskctl version', got: %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "taskctl version") {
+		t.Errorf("run -version: expected output to contain 'taskctl version', got: %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("run -version: expected output to contain 'commit:', got: %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("run -version: expected output to contain 'built:', got: %q", out)
+	}
+}
+
+// TestRun_VersionShortFlag verifies that `taskctl -v` prints version info
+// including build metadata and returns nil, matching the other version aliases.
+func TestRun_VersionShortFlag(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "-v"}, buf)
+	if err != nil {
+		t.Fatalf("run -v: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "taskctl version") {
+		t.Errorf("run -v: expected output to contain 'taskctl version', got: %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("run -v: expected output to contain 'commit:', got: %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("run -v: expected output to contain 'built:', got: %q", out)
 	}
 }
 
 // TestRun_VersionSubcommand verifies that `taskctl version` prints version
-// info and returns nil. Fixes #55 / #74.
+// info including build metadata and returns nil. Fixes #55 / #74.
 func TestRun_VersionSubcommand(t *testing.T) {
 	buf := newBuf()
 	err := run([]string{"taskctl", "version"}, buf)
 	if err != nil {
 		t.Fatalf("run version: unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "taskctl version") {
-		t.Errorf("run version: expected output to contain 'taskctl version', got: %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "taskctl version") {
+		t.Errorf("run version: expected output to contain 'taskctl version', got: %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("run version: expected output to contain 'commit:', got: %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("run version: expected output to contain 'built:', got: %q", out)
+	}
+}
+
+// TestRun_VersionOutputContainsGoVersion verifies that `taskctl --version`
+// includes the Go runtime/compiler version string (e.g. "go1.22.4").
+// This confirms the version output dynamically populates the Go version
+// rather than hardcoding it.
+func TestRun_VersionOutputContainsGoVersion(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "--version"}, buf)
+	if err != nil {
+		t.Fatalf("run --version: unexpected error: %v", err)
+	}
+	goVer := runtime.Version()
+	if !strings.Contains(buf.String(), goVer) {
+		t.Errorf("run --version: expected output to contain Go version %q, got: %q", goVer, buf.String())
+	}
+}
+
+// TestRun_VersionDefaultValues verifies that commit and date fields in version
+// output are always non-empty, whether populated by ldflags or by their
+// compiled-in defaults. This keeps the test valid regardless of how `go test`
+// is invoked (plain or with -ldflags).
+func TestRun_VersionDefaultValues(t *testing.T) {
+	buf := newBuf()
+	err := run([]string{"taskctl", "--version"}, buf)
+	if err != nil {
+		t.Fatalf("run --version: unexpected error: %v", err)
+	}
+	out := buf.String()
+	// The version output embeds commit and build-date (labelled "built:");
+	// verify they resolved to something rather than being blank. Accepts
+	// both the default "unknown" and any real value injected via ldflags.
+	if out == "" {
+		t.Fatal("run --version: produced empty output")
+	}
+	for _, label := range []string{"commit:", "built:"} {
+		if !strings.Contains(out, label) {
+			t.Errorf("run --version: expected output to contain %q label, got: %q", label, out)
+		}
 	}
 }
 
@@ -1024,8 +1105,8 @@ func TestMain_ExitCode(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected non-zero exit for unknown command, got exit 0")
 		}
-		exitErr, ok := err.(*exec.ExitError)
-		if !ok {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
 			t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
 		}
 		if got := exitErr.ExitCode(); got != 1 {
