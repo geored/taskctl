@@ -422,6 +422,7 @@ The test suite covers:
 taskctl/
 ├── main.go          # CLI entry point — command parsing and dispatch
 ├── go.mod           # Go module definition
+├── Makefile         # Build, test, and coverage tasks (try: make coverage)
 ├── Dockerfile       # Multi-stage Docker build
 ├── .gitignore       # Git ignore rules
 └── task/
@@ -461,7 +462,7 @@ Contributions are welcome! Here's how to get started:
 4. **Make your changes** and add tests where appropriate.
 5. **Run the test suite** to make sure everything passes:
    ```bash
-   go test -race ./...
+   make test
    ```
 6. **Commit** with a descriptive message following [Conventional Commits](https://www.conventionalcommits.org/):
    ```bash

@@ -69,6 +69,7 @@ taskctl (CLI binary)
 ├── go.mod                       Module definition (go 1.22, zero external deps)
 ├── go.sum                       (empty)
 ├── Dockerfile                   Multi-stage build → scratch image
+├── Makefile                     Build, test, and coverage automation targets
 ├── README.md                    User-facing documentation
 ├── tasks.json                   Default runtime storage (gitignored at runtime)
 ├── taskctl                      Pre-built binary (committed for convenience)
@@ -165,6 +166,8 @@ Properties that must hold at all times. Any PR breaking one must be rejected.
 
 ## 6. Commands
 
+All commands use the Go toolchain directly (no Makefile wrapper).
+
 ```bash
 # Build
 go build -o taskctl .
@@ -176,10 +179,10 @@ go build -ldflags "-X main.version=$(git describe --tags --always)" -o taskctl .
 go test ./...
 
 # Run with race detector (required before any merge)
-go test ./... -race
+go test -race ./...
 
-# Coverage report
-go test ./... -coverprofile=coverage.out
+# Coverage
+go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 go tool cover -html=coverage.out -o coverage.html
 
