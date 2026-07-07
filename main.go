@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -143,7 +144,7 @@ Global flags:
 
 Commands:
   add     [--priority <low|medium|high>] [--due YYYY-MM-DD] <title>
-  list    [--priority <low|medium|high>] [--overdue] [--count]
+  list    [--priority <low|medium|high>] [--overdue] [--count] [--sort <id|priority|title|due>]
   done    <id>
   delete  <id>
   stats
@@ -193,6 +194,7 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	priority := fs.String("priority", "", "Filter by priority: low, medium, high")
 	overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
 	showCount := fs.Bool("count", false, "Show total count of listed tasks")
+	sortField := fs.String("sort", "id", "Sort order: id, priority, title, due")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
@@ -203,9 +205,54 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 			return fmt.Errorf("list: invalid priority %q: must be low, medium, or high", *priority)
 		}
 	}
+	switch *sortField {
+	case "id", "priority", "title", "due":
+	default:
+		return fmt.Errorf("list: invalid sort field %q: must be id, priority, title, or due", *sortField)
+	}
 	tasks, err := mgr.List(*priority, *overdueOnly)
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
+	}
+	// Sort tasks based on --sort flag. "id" is a no-op (already in ID order).
+	switch *sortField {
+	case "priority":
+		priorityWeight := map[string]int{"high": 3, "medium": 2, "low": 1}
+		sort.SliceStable(tasks, func(i, j int) bool {
+			wi := priorityWeight[tasks[i].Priority]
+			wj := priorityWeight[tasks[j].Priority]
+			if wi != wj {
+				return wi > wj // descending by weight
+			}
+			return tasks[i].ID < tasks[j].ID // ascending by ID tie-break
+		})
+	case "title":
+		sort.SliceStable(tasks, func(i, j int) bool {
+			ti := strings.ToLower(tasks[i].Title)
+			tj := strings.ToLower(tasks[j].Title)
+			if ti != tj {
+				return ti < tj
+			}
+			return tasks[i].ID < tasks[j].ID
+		})
+	case "due":
+		sort.SliceStable(tasks, func(i, j int) bool {
+			di := tasks[i].DueDate
+			dj := tasks[j].DueDate
+			if di == "" && dj == "" {
+				return tasks[i].ID < tasks[j].ID
+			}
+			if di == "" {
+				return false // empty sorts last
+			}
+			if dj == "" {
+				return true // empty sorts last
+			}
+			if di != dj {
+				return di < dj
+			}
+			return tasks[i].ID < tasks[j].ID
+		})
 	}
 	if len(tasks) == 0 {
 		fmt.Fprintln(w, "No tasks found.")

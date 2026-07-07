@@ -1172,6 +1172,327 @@ func TestRunStats_CompletionRateRounding(t *testing.T) {
 // on success, which was previously 0% covered.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// runList --sort flag tests (TDD: feature not yet implemented)
+// ---------------------------------------------------------------------------
+
+// TestRunList_SortByPriority creates tasks with priorities high/low/medium/high,
+// sorts with --sort priority, and verifies output order is high (ID 1), high
+// (ID 4), medium, low.
+func TestRunList_SortByPriority(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "First high"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Only low"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Only medium"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "Second high"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "priority"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort priority: unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	// lines[0] = header, lines[1] = separator, lines[2..5] = data rows
+	if len(lines) < 6 {
+		t.Fatalf("expected at least 6 output lines (header + separator + 4 data), got %d:\n%s", len(lines), out)
+	}
+
+	// Verify order: high tasks first (IDs 1, 4), then medium (ID 3), then low (ID 2)
+	dataLines := lines[2:]
+	expectedOrder := []string{"First high", "Second high", "Only medium", "Only low"}
+	for i, want := range expectedOrder {
+		if !strings.Contains(dataLines[i], want) {
+			t.Errorf("row %d: expected to contain %q, got: %q", i, want, dataLines[i])
+		}
+	}
+}
+
+// TestRunList_SortByTitle creates tasks Zebra/apple/Banana, sorts with --sort title,
+// and verifies case-insensitive order apple, Banana, Zebra.
+func TestRunList_SortByTitle(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"Zebra"}, newBuf())
+	_ = runAdd(mgr, []string{"apple"}, newBuf())
+	_ = runAdd(mgr, []string{"Banana"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "title"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort title: unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 output lines (header + separator + 3 data), got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	expectedOrder := []string{"apple", "Banana", "Zebra"}
+	for i, want := range expectedOrder {
+		if !strings.Contains(dataLines[i], want) {
+			t.Errorf("row %d: expected to contain %q, got: %q", i, want, dataLines[i])
+		}
+	}
+}
+
+// TestRunList_SortByDue creates tasks with due dates 2025-03-01, "" (no due date),
+// 2024-01-15, sorts with --sort due, and verifies order 2024-01-15, 2025-03-01,
+// no-due-date-last.
+func TestRunList_SortByDue(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--due", "2025-03-01", "March task"}, newBuf())
+	_ = runAdd(mgr, []string{"No due task"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2024-01-15", "January task"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "due"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort due: unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 output lines (header + separator + 3 data), got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	// Order: 2024-01-15 first, 2025-03-01 second, no-due-date last
+	if !strings.Contains(dataLines[0], "January task") {
+		t.Errorf("row 0: expected 'January task' (earliest due), got: %q", dataLines[0])
+	}
+	if !strings.Contains(dataLines[1], "March task") {
+		t.Errorf("row 1: expected 'March task' (later due), got: %q", dataLines[1])
+	}
+	if !strings.Contains(dataLines[2], "No due task") {
+		t.Errorf("row 2: expected 'No due task' (no due date = last), got: %q", dataLines[2])
+	}
+}
+
+// TestRunList_SortByID creates 3 tasks in order, sorts with --sort id, and
+// verifies output matches natural insertion order.
+func TestRunList_SortByID(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"Task Alpha"}, newBuf())
+	_ = runAdd(mgr, []string{"Task Beta"}, newBuf())
+	_ = runAdd(mgr, []string{"Task Gamma"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "id"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort id: unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 output lines, got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	expectedOrder := []string{"Task Alpha", "Task Beta", "Task Gamma"}
+	for i, want := range expectedOrder {
+		if !strings.Contains(dataLines[i], want) {
+			t.Errorf("row %d: expected to contain %q, got: %q", i, want, dataLines[i])
+		}
+	}
+}
+
+// TestRunList_SortDefault compares output of runList with no --sort flag against
+// --sort id, and asserts byte-identical output (backward compatibility proof).
+func TestRunList_SortDefault(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task One"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Task Two"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task Three"}, newBuf())
+
+	bufDefault := newBuf()
+	err := runList(mgr, []string{}, bufDefault)
+	if err != nil {
+		t.Fatalf("runList (no --sort): unexpected error: %v", err)
+	}
+
+	bufSortID := newBuf()
+	err = runList(mgr, []string{"--sort", "id"}, bufSortID)
+	if err != nil {
+		t.Fatalf("runList --sort id: unexpected error: %v", err)
+	}
+
+	if bufDefault.String() != bufSortID.String() {
+		t.Errorf("output mismatch: default output and --sort id output should be byte-identical\ndefault:\n%s\n--sort id:\n%s", bufDefault.String(), bufSortID.String())
+	}
+}
+
+// TestRunList_SortInvalidValue runs --sort invalid and asserts the error string
+// is exactly: list: invalid sort field "invalid": must be id, priority, title, or due
+func TestRunList_SortInvalidValue(t *testing.T) {
+	mgr := newTestManager(t)
+	err := runList(mgr, []string{"--sort", "invalid"}, newBuf())
+	if err == nil {
+		t.Fatal("runList --sort invalid: expected error, got nil")
+	}
+	want := `list: invalid sort field "invalid": must be id, priority, title, or due`
+	if err.Error() != want {
+		t.Errorf("runList --sort invalid:\n  got:  %q\n  want: %q", err.Error(), want)
+	}
+}
+
+// TestRunList_SortWithPriorityFilter combines --sort priority --priority high --count,
+// verifies filtering + sorting + count all compose correctly.
+func TestRunList_SortWithPriorityFilter(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "High A"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Low B"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Med C"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "High D"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "priority", "--priority", "high", "--count"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort priority --priority high --count: unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	// Only high-priority tasks should appear
+	if strings.Contains(out, "Low B") || strings.Contains(out, "Med C") {
+		t.Errorf("non-high-priority tasks should be filtered out, got:\n%s", out)
+	}
+	if !strings.Contains(out, "High A") || !strings.Contains(out, "High D") {
+		t.Errorf("both high-priority tasks should appear, got:\n%s", out)
+	}
+
+	// Count line should show 2 tasks
+	if !strings.Contains(out, "\nTotal: 2 tasks\n") {
+		t.Errorf("expected '\\nTotal: 2 tasks\\n', got:\n%s", out)
+	}
+}
+
+// TestRunList_SortWithOverdueFilter combines --sort due --overdue, verifies
+// only overdue tasks shown, sorted by due date ascending.
+func TestRunList_SortWithOverdueFilter(t *testing.T) {
+	mgr := newTestManager(t)
+	// Overdue tasks (past dates)
+	_ = runAdd(mgr, []string{"--due", "2020-06-15", "Mid overdue"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2019-01-01", "Early overdue"}, newBuf())
+	// Future task (not overdue)
+	_ = runAdd(mgr, []string{"--due", "2099-12-31", "Future task"}, newBuf())
+	// No due date (not overdue)
+	_ = runAdd(mgr, []string{"No due task"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "due", "--overdue"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort due --overdue: unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	// Only overdue tasks should appear
+	if strings.Contains(out, "Future task") {
+		t.Errorf("future task should not appear in overdue list, got:\n%s", out)
+	}
+	if strings.Contains(out, "No due task") {
+		t.Errorf("task with no due date should not appear in overdue list, got:\n%s", out)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected at least 4 lines (header + separator + 2 data), got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	// Sorted by due date ascending: 2019-01-01 before 2020-06-15
+	if !strings.Contains(dataLines[0], "Early overdue") {
+		t.Errorf("row 0: expected 'Early overdue' (2019-01-01), got: %q", dataLines[0])
+	}
+	if !strings.Contains(dataLines[1], "Mid overdue") {
+		t.Errorf("row 1: expected 'Mid overdue' (2020-06-15), got: %q", dataLines[1])
+	}
+}
+
+// TestRunList_SortEmptyResult runs --sort title on empty store and asserts
+// output is exactly "No tasks found.\n".
+func TestRunList_SortEmptyResult(t *testing.T) {
+	mgr := newTestManager(t)
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "title"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort title (empty): unexpected error: %v", err)
+	}
+	want := "No tasks found.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("runList --sort title (empty): expected exactly %q, got: %q", want, got)
+	}
+}
+
+// TestRunList_SortPriorityTieBreakByID creates multiple tasks all with the same
+// priority, sorts with --sort priority, and asserts they appear in ascending
+// ID order (tie-break verification).
+func TestRunList_SortPriorityTieBreakByID(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "medium", "Charlie"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Alpha"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Bravo"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "priority"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort priority (tie-break): unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 lines, got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	// All same priority; tie-break by ascending ID: Charlie (1), Alpha (2), Bravo (3)
+	expectedOrder := []string{"Charlie", "Alpha", "Bravo"}
+	for i, want := range expectedOrder {
+		if !strings.Contains(dataLines[i], want) {
+			t.Errorf("row %d: expected to contain %q (ID-ordered tie-break), got: %q", i, want, dataLines[i])
+		}
+	}
+}
+
+// TestRunList_SortDueTieBreakByID creates multiple tasks with identical due dates,
+// sorts with --sort due, and asserts they appear in ascending ID order.
+func TestRunList_SortDueTieBreakByID(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--due", "2025-06-15", "Third added"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2025-06-15", "First added"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2025-06-15", "Second added"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--sort", "due"}, buf)
+	if err != nil {
+		t.Fatalf("runList --sort due (tie-break): unexpected error: %v", err)
+	}
+	out := buf.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 lines, got %d:\n%s", len(lines), out)
+	}
+
+	dataLines := lines[2:]
+	// All same due date; tie-break by ascending ID: Third added (1), First added (2), Second added (3)
+	expectedOrder := []string{"Third added", "First added", "Second added"}
+	for i, want := range expectedOrder {
+		if !strings.Contains(dataLines[i], want) {
+			t.Errorf("row %d: expected to contain %q (ID-ordered tie-break), got: %q", i, want, dataLines[i])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMain_ExitCode — subprocess integration test for main() exit behaviour
+// ---------------------------------------------------------------------------
+
 // TestMain_ExitCode builds the real binary and runs it as a child process to
 // verify the exit-code wiring inside main():
 //   - an unknown command produces exit code 1
