@@ -8,3 +8,4 @@ tasks.json
 # Coverage artefacts — regenerated on demand by CI (Finding #6)
 coverage*.out
 coverage*.html
+cov_review.out
