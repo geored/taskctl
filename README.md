@@ -158,16 +158,18 @@ taskctl add "Fix critical security patch" --priority high --due 2025-01-15
 
 ### `list`
 
-Display tasks. Without flags, all tasks are shown. Use `--priority` to filter by urgency, or `--overdue` to show only tasks past their due date.
+Display tasks. Without flags, all tasks are shown. Use `--priority` to filter by urgency, `--overdue` to show only tasks past their due date, `--count` to append a total, or `--sort` to change the display order.
 
 ```
-taskctl list [--priority <level>] [--overdue]
+taskctl list [--priority <level>] [--overdue] [--count] [--sort <field>]
 ```
 
 | Flag | Values | Default | Description |
 |---|---|---|---|
 | `--priority` | `low`, `medium`, `high` | _(none — shows all)_ | Filter tasks by priority level |
 | `--overdue` | _(boolean flag)_ | `false` | Show only incomplete tasks whose due date has passed |
+| `--count` | _(boolean flag)_ | `false` | Append a "Total: N tasks" line after the listing |
+| `--sort` | `id`, `priority`, `title`, `due` | `id` | Sort the output by the given field (priority sorts high-first; due sorts earliest-first with no-date last) |
 
 **Examples:**
 
@@ -263,7 +265,7 @@ Total tasks:     12
   High priority: 3
   Med priority:  6
   Low priority:  3
-Completion rate: 41%
+Completion rate: 42%
 ```
 
 **Notes:**
@@ -271,7 +273,7 @@ Completion rate: 41%
 - **Pending** = tasks not yet marked done.
 - **Completed** = tasks marked done via `taskctl done <id>`.
 - **Overdue** = incomplete tasks whose due date has passed.
-- **Completion rate** is an integer percentage: `(completed / total) * 100`. It is `0%` when there are no tasks.
+- **Completion rate** is an integer percentage using rounding division: `(completed * 100 + total / 2) / total`. It is `0%` when there are no tasks.
 - Priority counts (`High priority`, `Med priority`, `Low priority`) include both pending and completed tasks so they always sum to the total.
 
 ---
