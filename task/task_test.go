@@ -120,6 +120,7 @@ func TestNewManagerValidPath(t *testing.T) {
 	}
 	for _, p := range validPaths {
 		t.Run(p, func(t *testing.T) {
+			chdirTemp(t)
 			mgr, err := NewManager(p)
 			if err != nil {
 				t.Errorf("NewManager(%q): unexpected error for valid relative path: %v", p, err)
