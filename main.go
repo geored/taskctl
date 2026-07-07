@@ -143,7 +143,7 @@ Global flags:
 
 Commands:
   add     [--priority <low|medium|high>] [--due YYYY-MM-DD] <title>
-  list    [--priority <low|medium|high>] [--overdue]
+  list    [--priority <low|medium|high>] [--overdue] [--count]
   done    <id>
   delete  <id>
   stats
@@ -192,6 +192,7 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 	fs.SetOutput(os.Stderr)
 	priority := fs.String("priority", "", "Filter by priority: low, medium, high")
 	overdueOnly := fs.Bool("overdue", false, "Show only overdue incomplete tasks")
+	showCount := fs.Bool("count", false, "Show total count of listed tasks")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
@@ -227,6 +228,13 @@ func runList(mgr *task.Manager, args []string, w io.Writer) error {
 			title += " [OVERDUE]"
 		}
 		fmt.Fprintf(w, "%-4d %-6s %-8s %-12s %s\n", t.ID, done, t.Priority, due, title)
+	}
+	if *showCount {
+		word := "tasks"
+		if len(tasks) == 1 {
+			word = "task"
+		}
+		fmt.Fprintf(w, "\nTotal: %d %s\n", len(tasks), word)
 	}
 	return nil
 }

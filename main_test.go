@@ -287,6 +287,107 @@ func TestRunList_OverdueFlag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// runList --count flag tests (TDD: feature not yet implemented)
+// ---------------------------------------------------------------------------
+
+// TestRunList_CountFlag verifies that --count appends a "Total: N tasks" summary
+// line after the task table when multiple tasks are present.
+func TestRunList_CountFlag(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task A"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "medium", "Task B"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Task C"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--count"}, buf)
+	if err != nil {
+		t.Fatalf("runList --count: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ID") {
+		t.Errorf("runList --count: expected table header 'ID' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "\nTotal: 3 tasks\n") {
+		t.Errorf("runList --count: expected '\\nTotal: 3 tasks\\n' in output, got: %q", out)
+	}
+}
+
+// TestRunList_CountFlagWithPriority verifies that --count reflects the filtered
+// result count when combined with --priority, not the total task count.
+func TestRunList_CountFlagWithPriority(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "High A"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "high", "High B"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Low C"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--priority", "high", "--count"}, buf)
+	if err != nil {
+		t.Fatalf("runList --priority high --count: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\nTotal: 2 tasks\n") {
+		t.Errorf("runList --priority high --count: expected '\\nTotal: 2 tasks\\n', got: %q", out)
+	}
+}
+
+// TestRunList_CountFlagWithOverdue verifies that --count reflects only the
+// overdue tasks when combined with --overdue, and uses singular "task" for 1.
+func TestRunList_CountFlagWithOverdue(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--due", "2000-01-01", "Overdue task"}, newBuf())
+	_ = runAdd(mgr, []string{"--due", "2099-12-31", "Future task"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--overdue", "--count"}, buf)
+	if err != nil {
+		t.Fatalf("runList --overdue --count: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\nTotal: 1 task\n") {
+		t.Errorf("runList --overdue --count: expected '\\nTotal: 1 task\\n' (singular), got: %q", out)
+	}
+}
+
+// TestRunList_CountFlagEmptyResult verifies that --count on an empty store
+// produces exactly "No tasks found.\n" with no Total line appended.
+func TestRunList_CountFlagEmptyResult(t *testing.T) {
+	mgr := newTestManager(t)
+
+	buf := newBuf()
+	err := runList(mgr, []string{"--count"}, buf)
+	if err != nil {
+		t.Fatalf("runList --count empty: unexpected error: %v", err)
+	}
+	out := buf.String()
+	want := "No tasks found.\n"
+	if out != want {
+		t.Errorf("runList --count empty: expected exactly %q, got: %q", want, out)
+	}
+	if strings.Contains(out, "Total:") {
+		t.Errorf("runList --count empty: output must not contain 'Total:', got: %q", out)
+	}
+}
+
+// TestRunList_WithoutCountFlagNoSummary verifies backward compatibility: when
+// --count is NOT passed, no "Total:" summary line appears in the output.
+func TestRunList_WithoutCountFlagNoSummary(t *testing.T) {
+	mgr := newTestManager(t)
+	_ = runAdd(mgr, []string{"--priority", "high", "Task X"}, newBuf())
+	_ = runAdd(mgr, []string{"--priority", "low", "Task Y"}, newBuf())
+
+	buf := newBuf()
+	err := runList(mgr, []string{}, buf)
+	if err != nil {
+		t.Fatalf("runList without --count: unexpected error: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "Total:") {
+		t.Errorf("runList without --count: output must NOT contain 'Total:', got: %q", out)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // runDone tests
 // ---------------------------------------------------------------------------
 
